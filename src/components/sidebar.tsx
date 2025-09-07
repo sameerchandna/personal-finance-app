@@ -13,7 +13,8 @@ import {
   ChevronRight,
   Menu,
   X,
-  Calculator
+  Calculator,
+  TrendingUp
 } from "lucide-react";
 
 const navigation = [
@@ -26,6 +27,11 @@ const navigation = [
     name: "Mortgage",
     href: "/mortgage",
     icon: Calculator,
+  },
+  {
+    name: "Investment",
+    href: "/investment",
+    icon: TrendingUp,
   },
   {
     name: "About",
