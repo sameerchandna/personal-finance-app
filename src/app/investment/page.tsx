@@ -14,24 +14,27 @@ import {
   ArrowUpRight,
   ChevronDown,
   ChevronUp,
-  Calculator
+  Calculator,
+  Settings
 } from "lucide-react";
 import {
   Chart as ChartJS,
   CategoryScale,
   LinearScale,
   PointElement,
+  LineElement,
   BarElement,
   Title,
   Tooltip,
   Legend,
 } from 'chart.js';
-import { Bar } from 'react-chartjs-2';
+import { Bar, Line } from 'react-chartjs-2';
 
 ChartJS.register(
   CategoryScale,
   LinearScale,
   PointElement,
+  LineElement,
   BarElement,
   Title,
   Tooltip,
@@ -44,7 +47,6 @@ interface InvestmentInputs {
   annualReturnRate: number;
   investmentYears: number;
   contributionFrequency: "monthly" | "quarterly" | "annually";
-  riskLevel: "conservative" | "moderate" | "aggressive";
 }
 
 interface InvestmentResults {
@@ -74,8 +76,7 @@ export default function InvestmentCalculator() {
     monthlyContribution: 500,
     annualReturnRate: 7,
     investmentYears: 20,
-    contributionFrequency: "monthly",
-    riskLevel: "moderate"
+    contributionFrequency: "monthly"
   });
 
   const [displayInputs, setDisplayInputs] = useState<InvestmentInputs>({
@@ -83,18 +84,20 @@ export default function InvestmentCalculator() {
     monthlyContribution: 500,
     annualReturnRate: 7,
     investmentYears: 20,
-    contributionFrequency: "monthly",
-    riskLevel: "moderate"
+    contributionFrequency: "monthly"
   });
 
   const [isFormExpanded, setIsFormExpanded] = useState(false);
   const [isUpdating, setIsUpdating] = useState(false);
+  
+  // Rate comparison settings
+  const [rateSettings, setRateSettings] = useState({
+    conservative: 3,
+    moderate: 7,
+    aggressive: 10
+  });
+  const [showRateSettings, setShowRateSettings] = useState(false);
 
-  const riskLevels = {
-    conservative: { rate: 4, color: "text-green-600", bgColor: "bg-green-50" },
-    moderate: { rate: 7, color: "text-blue-600", bgColor: "bg-blue-50" },
-    aggressive: { rate: 10, color: "text-red-600", bgColor: "bg-red-50" }
-  };
 
   const calculateInvestment = useMemo((): InvestmentResults => {
     const { initialAmount, monthlyContribution, annualReturnRate, investmentYears, contributionFrequency } = displayInputs;
@@ -211,13 +214,6 @@ export default function InvestmentCalculator() {
     }));
   };
 
-  const handleRiskLevelChange = (riskLevel: "conservative" | "moderate" | "aggressive") => {
-    setInputs(prev => ({
-      ...prev,
-      riskLevel,
-      annualReturnRate: riskLevels[riskLevel].rate
-    }));
-  };
 
   const handleUpdateCalculations = async () => {
     console.log('Update clicked! Current inputs:', inputs);
@@ -241,6 +237,64 @@ export default function InvestmentCalculator() {
   const formatPercentage = (rate: number) => {
     return `${rate}%`;
   };
+
+  // Calculate rate comparison scenarios
+  const calculateRateComparison = useMemo(() => {
+    const { initialAmount, monthlyContribution, investmentYears, contributionFrequency } = displayInputs;
+    
+    const frequencyMultiplier = contributionFrequency === "monthly" ? 1 : 
+                               contributionFrequency === "quarterly" ? 3 : 12;
+    const contributionAmount = monthlyContribution;
+    
+    const scenarios = Object.entries(rateSettings).map(([name, rate]) => {
+      const monthlyRate = rate / 100 / 12;
+      let originalAmountValue = initialAmount;
+      let totalRegularContributions = 0;
+      let totalRegularContributionsValue = 0;
+      const yearlyData = [];
+      
+      // Add Year 0
+      yearlyData.push({
+        year: 0,
+        value: initialAmount
+      });
+      
+      // Calculate year by year
+      for (let year = 1; year <= investmentYears; year++) {
+        for (let month = 1; month <= 12; month++) {
+          let shouldAddContribution = false;
+          if (frequencyMultiplier === 1) {
+            shouldAddContribution = true;
+          } else if (frequencyMultiplier === 3) {
+            shouldAddContribution = (month === 1 || month === 4 || month === 7 || month === 10);
+          } else if (frequencyMultiplier === 12) {
+            shouldAddContribution = (month === 1);
+          }
+          
+          if (shouldAddContribution) {
+            totalRegularContributions += contributionAmount;
+            totalRegularContributionsValue += contributionAmount;
+          }
+          
+          originalAmountValue *= (1 + monthlyRate);
+          totalRegularContributionsValue *= (1 + monthlyRate);
+        }
+        
+        yearlyData.push({
+          year,
+          value: originalAmountValue + totalRegularContributionsValue
+        });
+      }
+      
+      return {
+        name,
+        rate,
+        data: yearlyData
+      };
+    });
+    
+    return scenarios;
+  }, [displayInputs, rateSettings]);
 
   // Chart data for growth over time (4-Component Stacked Bar Chart)
   const growthChartData = {
@@ -281,6 +335,19 @@ export default function InvestmentCalculator() {
   console.log('Regular contributions data:', growthChartData.datasets[2].data);
   console.log('Interest on regular data:', growthChartData.datasets[3].data);
 
+  // Rate comparison chart data
+  const rateComparisonChartData = {
+    labels: calculateRateComparison[0]?.data.map(item => `Year ${item.year}`) || [],
+    datasets: calculateRateComparison.map((scenario, index) => ({
+      label: `${scenario.name.charAt(0).toUpperCase() + scenario.name.slice(1)} (${scenario.rate}%)`,
+      data: scenario.data.map(item => item.value),
+      borderColor: index === 0 ? 'rgb(34, 197, 94)' : index === 1 ? 'rgb(59, 130, 246)' : 'rgb(239, 68, 68)',
+      backgroundColor: index === 0 ? 'rgba(34, 197, 94, 0.1)' : index === 1 ? 'rgba(59, 130, 246, 0.1)' : 'rgba(239, 68, 68, 0.1)',
+      tension: 0.1,
+      fill: false,
+    }))
+  };
+
   const chartOptions = {
     responsive: true,
     maintainAspectRatio: false,
@@ -299,6 +366,30 @@ export default function InvestmentCalculator() {
       },
       y: {
         stacked: true,
+        beginAtZero: true,
+        ticks: {
+          callback: function(value: any) {
+            return formatCurrency(value);
+          }
+        }
+      }
+    }
+  };
+
+  const rateComparisonChartOptions = {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+      legend: {
+        position: 'top' as const,
+      },
+      title: {
+        display: true,
+        text: 'Investment Growth Comparison by Return Rate'
+      },
+    },
+    scales: {
+      y: {
         beginAtZero: true,
         ticks: {
           callback: function(value: any) {
@@ -435,24 +526,6 @@ export default function InvestmentCalculator() {
                     </Select>
                   </div>
 
-                  {/* Risk Level */}
-                  <div className="space-y-2">
-                    <Label>Risk Level & Expected Return</Label>
-                    <div className="grid grid-cols-3 gap-2">
-                      {Object.entries(riskLevels).map(([level, config]) => (
-                        <Button
-                          key={level}
-                          variant={inputs.riskLevel === level ? "default" : "outline"}
-                          onClick={() => handleRiskLevelChange(level as "conservative" | "moderate" | "aggressive")}
-                          className={`capitalize ${config.bgColor} ${config.color} hover:opacity-80`}
-                        >
-                          {level}
-                          <br />
-                          <span className="text-xs">{config.rate}%</span>
-                        </Button>
-                      ))}
-                    </div>
-                  </div>
 
                   {/* Custom Annual Return Rate */}
                   <div className="space-y-2">
@@ -488,7 +561,7 @@ export default function InvestmentCalculator() {
           </Card>
 
           {/* Key Metrics */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             <Card>
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm font-medium text-slate-600 dark:text-slate-400">
@@ -496,8 +569,18 @@ export default function InvestmentCalculator() {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold text-slate-900 dark:text-slate-100">
+                <div className="text-2xl font-bold text-slate-900 dark:text-slate-100 mb-3">
                   {formatCurrency(calculateInvestment.totalInvested)}
+                </div>
+                <div className="space-y-1 text-xs text-slate-600 dark:text-slate-400">
+                  <div className="flex justify-between">
+                    <span>From Original Investment:</span>
+                    <span>{formatCurrency(displayInputs.initialAmount)} ({(displayInputs.initialAmount / calculateInvestment.totalInvested * 100).toFixed(1)}%)</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>From Regular Contribution:</span>
+                    <span>{formatCurrency(calculateInvestment.totalInvested - displayInputs.initialAmount)} ({((calculateInvestment.totalInvested - displayInputs.initialAmount) / calculateInvestment.totalInvested * 100).toFixed(1)}%)</span>
+                  </div>
                 </div>
               </CardContent>
             </Card>
@@ -509,8 +592,18 @@ export default function InvestmentCalculator() {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold text-slate-900 dark:text-slate-100">
+                <div className="text-2xl font-bold text-slate-900 dark:text-slate-100 mb-3">
                   {formatCurrency(calculateInvestment.finalValue)}
+                </div>
+                <div className="space-y-1 text-xs text-slate-600 dark:text-slate-400">
+                  <div className="flex justify-between">
+                    <span>Without Regular Contributions:</span>
+                    <span>{formatCurrency(calculateInvestment.withoutRegularSavings.finalValue)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>From Regular Contribution:</span>
+                    <span>{formatCurrency(calculateInvestment.finalValue - calculateInvestment.withoutRegularSavings.finalValue)} ({((calculateInvestment.finalValue - calculateInvestment.withoutRegularSavings.finalValue) / calculateInvestment.finalValue * 100).toFixed(1)}%)</span>
+                  </div>
                 </div>
               </CardContent>
             </Card>
@@ -522,40 +615,67 @@ export default function InvestmentCalculator() {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold text-slate-900 dark:text-slate-100">
+                <div className="text-2xl font-bold text-slate-900 dark:text-slate-100 mb-3">
                   {formatCurrency(calculateInvestment.totalInterest)}
                 </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium text-slate-600 dark:text-slate-400">
-                  Without Regular Savings
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold text-slate-900 dark:text-slate-100">
-                  {formatCurrency(calculateInvestment.withoutRegularSavings.finalValue)}
+                <div className="space-y-1 text-xs text-slate-600 dark:text-slate-400">
+                  <div className="flex justify-between">
+                    <span>Interest from Original Amount:</span>
+                    <span>{formatCurrency(calculateInvestment.withoutRegularSavings.totalInterest)} ({(calculateInvestment.withoutRegularSavings.totalInterest / calculateInvestment.totalInterest * 100).toFixed(1)}%)</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Interest from Regular Contributions:</span>
+                    <span>{formatCurrency(calculateInvestment.totalInterest - calculateInvestment.withoutRegularSavings.totalInterest)} ({((calculateInvestment.totalInterest - calculateInvestment.withoutRegularSavings.totalInterest) / calculateInvestment.totalInterest * 100).toFixed(1)}%)</span>
+                  </div>
                 </div>
               </CardContent>
             </Card>
           </div>
 
-          {/* Investment Growth Chart */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Investment Breakdown Over Time</CardTitle>
-              <CardDescription>
-                See how original amount, regular contributions, and their respective interest earnings build wealth over time
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="h-96">
-                <Bar data={growthChartData} options={chartOptions} />
-              </div>
-            </CardContent>
-          </Card>
+          {/* Charts Grid */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Investment Breakdown Chart */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Investment Breakdown Over Time</CardTitle>
+                <CardDescription>
+                  See how original amount, regular contributions, and their respective interest earnings build wealth over time
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="h-96">
+                  <Bar data={growthChartData} options={chartOptions} />
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Rate Comparison Chart */}
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle>Rate Comparison</CardTitle>
+                    <CardDescription>
+                      Compare investment growth across different return rate scenarios
+                    </CardDescription>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setShowRateSettings(true)}
+                    className="flex items-center gap-2"
+                  >
+                    <Settings className="h-4 w-4" />
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <div className="h-96">
+                  <Line data={rateComparisonChartData} options={rateComparisonChartOptions} />
+                </div>
+              </CardContent>
+            </Card>
+          </div>
 
           {/* Detailed Yearly Breakdown */}
           <Card>
@@ -612,6 +732,74 @@ export default function InvestmentCalculator() {
               </div>
             </CardContent>
           </Card>
+
+          {/* Rate Settings Modal */}
+          {showRateSettings && (
+            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+              <Card className="w-full max-w-md mx-4">
+                <CardHeader>
+                  <CardTitle>Rate Comparison Settings</CardTitle>
+                  <CardDescription>
+                    Configure the return rates for Conservative, Moderate, and Aggressive scenarios
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="conservative-rate">Conservative Rate (%)</Label>
+                    <Input
+                      id="conservative-rate"
+                      type="number"
+                      step="0.1"
+                      value={rateSettings.conservative}
+                      onChange={(e) => setRateSettings(prev => ({
+                        ...prev,
+                        conservative: parseFloat(e.target.value) || 0
+                      }))}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="moderate-rate">Moderate Rate (%)</Label>
+                    <Input
+                      id="moderate-rate"
+                      type="number"
+                      step="0.1"
+                      value={rateSettings.moderate}
+                      onChange={(e) => setRateSettings(prev => ({
+                        ...prev,
+                        moderate: parseFloat(e.target.value) || 0
+                      }))}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="aggressive-rate">Aggressive Rate (%)</Label>
+                    <Input
+                      id="aggressive-rate"
+                      type="number"
+                      step="0.1"
+                      value={rateSettings.aggressive}
+                      onChange={(e) => setRateSettings(prev => ({
+                        ...prev,
+                        aggressive: parseFloat(e.target.value) || 0
+                      }))}
+                    />
+                  </div>
+                  <div className="flex justify-end gap-2 pt-4">
+                    <Button
+                      variant="outline"
+                      onClick={() => setShowRateSettings(false)}
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      onClick={() => setShowRateSettings(false)}
+                    >
+                      Save Settings
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          )}
         </div>
       </div>
     </div>
