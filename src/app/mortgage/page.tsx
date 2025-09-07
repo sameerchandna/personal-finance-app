@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useMemo } from "react";
+import { useUser } from '@clerk/nextjs';
+import { SignIn } from '@clerk/nextjs';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -68,6 +70,46 @@ interface ComparisonScenario {
 }
 
 export default function MortgagePage() {
+  const { isSignedIn, isLoaded } = useUser();
+
+  // Show loading state while checking authentication
+  if (!isLoaded) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-gray-600 dark:text-gray-300">Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Show sign-in page if not authenticated
+  if (!isSignedIn) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-white to-green-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">
+        <div className="w-full max-w-md">
+          <div className="text-center mb-8">
+            <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">
+              Mortgage Calculator
+            </h1>
+            <p className="text-gray-600 dark:text-gray-300">
+              Please sign in to access your personal mortgage calculator
+            </p>
+          </div>
+          <SignIn 
+            appearance={{
+              elements: {
+                formButtonPrimary: 'bg-blue-600 hover:bg-blue-700 text-sm normal-case',
+                card: 'shadow-lg border-0',
+              }
+            }}
+          />
+        </div>
+      </div>
+    );
+  }
+
   // Helper function to get today's date in YYYY-MM-DD format
   const getTodayString = () => {
     const today = new Date();

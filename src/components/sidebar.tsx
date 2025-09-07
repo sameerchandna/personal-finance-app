@@ -14,7 +14,8 @@ import {
   Menu,
   X,
   Calculator,
-  TrendingUp
+  TrendingUp,
+  User
 } from "lucide-react";
 
 const navigation = [
@@ -22,6 +23,11 @@ const navigation = [
     name: "Home",
     href: "/",
     icon: Home,
+  },
+  {
+    name: "Dashboard",
+    href: "/dashboard",
+    icon: User,
   },
   {
     name: "Mortgage",

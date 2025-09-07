@@ -4,9 +4,11 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { UserButton, useUser } from '@clerk/nextjs';
 
 export function Navbar() {
   const pathname = usePathname();
+  const { isSignedIn, isLoaded } = useUser();
 
   const isActive = (path: string) => pathname === path;
 
@@ -27,12 +29,28 @@ export function Navbar() {
           {/* CTA Buttons */}
           <div className="flex items-center space-x-4">
             <ThemeToggle />
-            <Button variant="outline" size="sm">
-              Sign In
-            </Button>
-            <Button size="sm">
-              Get Started
-            </Button>
+            {isLoaded && (
+              <>
+                {isSignedIn ? (
+                  <UserButton 
+                    appearance={{
+                      elements: {
+                        avatarBox: "w-8 h-8"
+                      }
+                    }}
+                  />
+                ) : (
+                  <>
+                    <Button variant="outline" size="sm" asChild>
+                      <Link href="/sign-in">Sign In</Link>
+                    </Button>
+                    <Button size="sm" asChild>
+                      <Link href="/sign-up">Get Started</Link>
+                    </Button>
+                  </>
+                )}
+              </>
+            )}
           </div>
         </div>
       </div>
