@@ -3,6 +3,8 @@
 import { useState, useMemo } from "react";
 import { useUser } from '@clerk/nextjs';
 import { SignIn } from '@clerk/nextjs';
+import { useSavedCalculations } from '@/hooks/useSavedCalculations';
+import { SaveLoadDialog } from '@/components/save-load-dialog';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,7 +19,8 @@ import {
   ChevronDown,
   ChevronUp,
   Calculator,
-  Settings
+  Settings,
+  Save
 } from "lucide-react";
 import {
   Chart as ChartJS,
@@ -112,6 +115,17 @@ export default function InvestmentCalculator() {
       </div>
     );
   }
+
+  // Only call hooks after authentication checks
+  const { user } = useUser();
+  const { 
+    investmentCalculations, 
+    saveInvestmentCalculation, 
+    deleteInvestmentCalculation,
+    loading: calculationsLoading 
+  } = useSavedCalculations(user);
+  
+  const [showSaveLoadDialog, setShowSaveLoadDialog] = useState(false);
 
   const [inputs, setInputs] = useState<InvestmentInputs>({
     initialAmount: 10000,
@@ -265,6 +279,35 @@ export default function InvestmentCalculator() {
     setDisplayInputs(inputs);
     console.log('Display inputs updated to:', inputs);
     setIsUpdating(false);
+  };
+
+  const handleSaveCalculation = async (name: string) => {
+    await saveInvestmentCalculation({
+      name,
+      initial_amount: displayInputs.initialAmount,
+      monthly_contribution: displayInputs.monthlyContribution,
+      annual_return_rate: displayInputs.annualReturnRate,
+      investment_years: displayInputs.investmentYears,
+      contribution_frequency: displayInputs.contributionFrequency,
+    });
+  };
+
+  const handleLoadCalculation = (calculation: any) => {
+    setInputs({
+      initialAmount: calculation.initial_amount,
+      monthlyContribution: calculation.monthly_contribution,
+      annualReturnRate: calculation.annual_return_rate,
+      investmentYears: calculation.investment_years,
+      contributionFrequency: calculation.contribution_frequency,
+    });
+    setDisplayInputs({
+      initialAmount: calculation.initial_amount,
+      monthlyContribution: calculation.monthly_contribution,
+      annualReturnRate: calculation.annual_return_rate,
+      investmentYears: calculation.investment_years,
+      contributionFrequency: calculation.contribution_frequency,
+    });
+    setShowSaveLoadDialog(false);
   };
 
   const formatCurrency = (amount: number) => {
@@ -476,6 +519,15 @@ export default function InvestmentCalculator() {
                   </CardDescription>
                 </div>
                 <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setShowSaveLoadDialog(true)}
+                    className="flex items-center gap-2"
+                  >
+                    <Save className="h-4 w-4" />
+                    Save/Load
+                  </Button>
                   <Button
                     variant="ghost"
                     size="sm"
@@ -842,6 +894,18 @@ export default function InvestmentCalculator() {
               </Card>
             </div>
           )}
+
+          {/* Save/Load Dialog */}
+          <SaveLoadDialog
+            isOpen={showSaveLoadDialog}
+            onClose={() => setShowSaveLoadDialog(false)}
+            savedCalculations={investmentCalculations}
+            onSave={handleSaveCalculation}
+            onLoad={handleLoadCalculation}
+            onDelete={deleteInvestmentCalculation}
+            type="investment"
+            loading={calculationsLoading}
+          />
         </div>
       </div>
     </div>

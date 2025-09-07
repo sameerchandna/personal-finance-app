@@ -3,6 +3,8 @@
 import { useState, useMemo } from "react";
 import { useUser } from '@clerk/nextjs';
 import { SignIn } from '@clerk/nextjs';
+import { useSavedCalculations } from '@/hooks/useSavedCalculations';
+import { SaveLoadDialog } from '@/components/save-load-dialog';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,7 +12,7 @@ import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { Calculator, TrendingUp, PieChart, Calendar, DollarSign, Clock, ChevronDown, ChevronUp } from "lucide-react";
+import { Calculator, TrendingUp, PieChart, Calendar, DollarSign, Clock, ChevronDown, ChevronUp, Save } from "lucide-react";
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -110,6 +112,17 @@ export default function MortgagePage() {
     );
   }
 
+  // Only call hooks after authentication checks
+  const { user } = useUser();
+  const { 
+    mortgageCalculations, 
+    saveMortgageCalculation, 
+    deleteMortgageCalculation,
+    loading: calculationsLoading 
+  } = useSavedCalculations(user);
+  
+  const [showSaveLoadDialog, setShowSaveLoadDialog] = useState(false);
+
   // Helper function to get today's date in YYYY-MM-DD format
   const getTodayString = () => {
     const today = new Date();
@@ -168,6 +181,49 @@ export default function MortgagePage() {
     await new Promise(resolve => setTimeout(resolve, 300));
     setCalculationInputs(inputs);
     setIsUpdating(false);
+  };
+
+  const handleSaveCalculation = async (name: string) => {
+    await saveMortgageCalculation({
+      name,
+      loan_amount: calculationInputs.mortgageAmount,
+      interest_rate: calculationInputs.interestRate,
+      loan_term_years: calculationInputs.termYears,
+      down_payment: calculationInputs.propertyValue - calculationInputs.mortgageAmount,
+      property_tax: 0, // Not in current form, default to 0
+      home_insurance: 0, // Not in current form, default to 0
+      pmi: 0, // Not in current form, default to 0
+      payment_type: calculationInputs.paymentType,
+      rate_type: calculationInputs.rateType,
+      extra_payment: calculationInputs.extraPayment,
+      start_date: calculationInputs.startDate,
+      fixed_rate_end_date: calculationInputs.fixedRateEndDate,
+      variable_rate: calculationInputs.variableRate,
+      variable_rate_enabled: calculationInputs.variableRateEnabled,
+    });
+  };
+
+  const handleLoadCalculation = (calculation: any) => {
+    const downPayment = calculation.down_payment || 0;
+    const propertyValue = calculation.loan_amount + downPayment;
+    
+    const loadedInputs = {
+      propertyValue: propertyValue,
+      mortgageAmount: calculation.loan_amount,
+      interestRate: calculation.interest_rate,
+      termYears: calculation.loan_term_years,
+      paymentType: calculation.payment_type || "repayment",
+      rateType: calculation.rate_type || "fixed",
+      extraPayment: calculation.extra_payment || 0,
+      startDate: calculation.start_date || getTodayString(),
+      fixedRateEndDate: calculation.fixed_rate_end_date || getFixedRateEndDate(),
+      variableRate: calculation.variable_rate || 8.0,
+      variableRateEnabled: calculation.variable_rate_enabled || false,
+    };
+    
+    setInputs(loadedInputs);
+    setCalculationInputs(loadedInputs);
+    setShowSaveLoadDialog(false);
   };
 
   // Helper function to calculate months between two dates
@@ -431,6 +487,15 @@ export default function MortgagePage() {
                     </CardDescription>
                   </div>
                   <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setShowSaveLoadDialog(true)}
+                      className="flex items-center gap-2"
+                    >
+                      <Save className="h-4 w-4" />
+                      Save/Load
+                    </Button>
                     <Button
                       variant="ghost"
                       size="sm"
@@ -932,6 +997,18 @@ export default function MortgagePage() {
             </Card>
           </TabsContent>
         </Tabs>
+
+        {/* Save/Load Dialog */}
+        <SaveLoadDialog
+          isOpen={showSaveLoadDialog}
+          onClose={() => setShowSaveLoadDialog(false)}
+          savedCalculations={mortgageCalculations}
+          onSave={handleSaveCalculation}
+          onLoad={handleLoadCalculation}
+          onDelete={deleteMortgageCalculation}
+          type="mortgage"
+          loading={calculationsLoading}
+        />
       </div>
     </div>
   );
