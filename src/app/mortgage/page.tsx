@@ -1,0 +1,896 @@
+"use client";
+
+import { useState, useMemo } from "react";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
+import { Calculator, TrendingUp, PieChart, Calendar, DollarSign, Clock, ChevronDown, ChevronUp } from "lucide-react";
+import {
+  Chart as ChartJS,
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  LineElement,
+  Title,
+  Tooltip,
+  Legend,
+  ArcElement,
+} from 'chart.js';
+import { Doughnut } from 'react-chartjs-2';
+import AmortizationChart from '@/components/amortization-chart';
+
+ChartJS.register(
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  LineElement,
+  Title,
+  Tooltip,
+  Legend,
+  ArcElement
+);
+
+interface MortgageInputs {
+  propertyValue: number;
+  mortgageAmount: number;
+  interestRate: number;
+  termYears: number;
+  paymentType: "repayment" | "interest-only";
+  rateType: "fixed" | "variable";
+  extraPayment: number;
+  startDate: string;
+  fixedRateEndDate: string;
+  variableRate: number;
+  variableRateEnabled: boolean;
+}
+
+interface AmortizationEntry {
+  month: number;
+  payment: number;
+  principal: number;
+  interest: number;
+  balance: number;
+  interestRate: number;
+  date: string;
+}
+
+interface ComparisonScenario {
+  name: string;
+  interestRate: number;
+  termYears: number;
+  monthlyPayment: number;
+  totalInterest: number;
+  totalAmount: number;
+}
+
+export default function MortgagePage() {
+  // Helper function to get today's date in YYYY-MM-DD format
+  const getTodayString = () => {
+    const today = new Date();
+    return today.toISOString().split('T')[0];
+  };
+
+  // Helper function to get date 5 years from today
+  const getFixedRateEndDate = () => {
+    const today = new Date();
+    const endDate = new Date(today);
+    endDate.setFullYear(today.getFullYear() + 5);
+    return endDate.toISOString().split('T')[0];
+  };
+
+  const [inputs, setInputs] = useState<MortgageInputs>({
+    propertyValue: 900000,
+    mortgageAmount: 579289,
+    interestRate: 2.79,
+    termYears: 35,
+    paymentType: "repayment",
+    rateType: "fixed",
+    extraPayment: 0,
+    startDate: getTodayString(),
+    fixedRateEndDate: getFixedRateEndDate(),
+    variableRate: 8.0,
+    variableRateEnabled: false,
+  });
+
+  const [calculationInputs, setCalculationInputs] = useState<MortgageInputs>({
+    propertyValue: 900000,
+    mortgageAmount: 579289,
+    interestRate: 2.79,
+    termYears: 35,
+    paymentType: "repayment",
+    rateType: "fixed",
+    extraPayment: 0,
+    startDate: getTodayString(),
+    fixedRateEndDate: getFixedRateEndDate(),
+    variableRate: 8.0,
+    variableRateEnabled: false,
+  });
+
+  const [isFormExpanded, setIsFormExpanded] = useState(false);
+  const [isUpdating, setIsUpdating] = useState(false);
+
+  const handleInputChange = (field: keyof MortgageInputs, value: string | number | boolean) => {
+    setInputs(prev => ({
+      ...prev,
+      [field]: value
+    }));
+  };
+
+  const handleUpdateCalculations = async () => {
+    setIsUpdating(true);
+    // Add a small delay to show the loading state
+    await new Promise(resolve => setTimeout(resolve, 300));
+    setCalculationInputs(inputs);
+    setIsUpdating(false);
+  };
+
+  // Helper function to calculate months between two dates
+  const getMonthsBetween = (startDate: string, endDate: string): number => {
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    const yearDiff = end.getFullYear() - start.getFullYear();
+    const monthDiff = end.getMonth() - start.getMonth();
+    return yearDiff * 12 + monthDiff;
+  };
+
+  // Helper function to add months to a date
+  const addMonthsToDate = (date: string, months: number): string => {
+    const d = new Date(date);
+    d.setMonth(d.getMonth() + months);
+    return d.toISOString().split('T')[0];
+  };
+
+  // Calculate fixed rate period
+  const fixedRateMonths = calculationInputs.variableRateEnabled 
+    ? getMonthsBetween(calculationInputs.startDate, calculationInputs.fixedRateEndDate)
+    : calculationInputs.termYears * 12;
+
+  // Calculate variable rate period
+  const variableRateMonths = calculationInputs.variableRateEnabled 
+    ? (calculationInputs.termYears * 12) - fixedRateMonths
+    : 0;
+
+  // Calculate rates
+  const fixedMonthlyRate = calculationInputs.interestRate / 100 / 12;
+  const variableMonthlyRate = calculationInputs.variableRateEnabled 
+    ? calculationInputs.variableRate / 100 / 12 
+    : fixedMonthlyRate;
+
+  const totalPayments = calculationInputs.termYears * 12;
+
+  // For display purposes, calculate initial monthly payment using fixed rate
+  const initialMonthlyPayment = calculationInputs.paymentType === "repayment" 
+    ? calculationInputs.mortgageAmount * (fixedMonthlyRate * Math.pow(1 + fixedMonthlyRate, totalPayments)) / (Math.pow(1 + fixedMonthlyRate, totalPayments) - 1)
+    : calculationInputs.mortgageAmount * fixedMonthlyRate;
+
+  // Calculate total interest and amount will be done in the amortization schedule
+  const ltv = (calculationInputs.mortgageAmount / calculationInputs.propertyValue) * 100;
+  const deposit = calculationInputs.propertyValue - calculationInputs.mortgageAmount;
+
+  // Generate amortization schedule
+  const amortizationSchedule = useMemo((): AmortizationEntry[] => {
+    if (calculationInputs.paymentType === "interest-only") {
+      return Array.from({ length: totalPayments }, (_, i) => {
+        const currentRate = i < fixedRateMonths ? fixedMonthlyRate : variableMonthlyRate;
+        const payment = calculationInputs.mortgageAmount * currentRate;
+        const date = addMonthsToDate(calculationInputs.startDate, i);
+        
+        return {
+          month: i + 1,
+          payment,
+          principal: 0,
+          interest: payment,
+          balance: calculationInputs.mortgageAmount,
+          interestRate: currentRate * 12 * 100, // Convert back to annual percentage
+          date,
+        };
+      });
+    }
+
+    const schedule: AmortizationEntry[] = [];
+    let balance = calculationInputs.mortgageAmount;
+    let currentDate = calculationInputs.startDate;
+
+    for (let month = 1; month <= totalPayments; month++) {
+      // Determine which rate to use
+      const isFixedRatePeriod = month <= fixedRateMonths;
+      const currentRate = isFixedRatePeriod ? fixedMonthlyRate : variableMonthlyRate;
+      
+      // Calculate payment amount (this will be recalculated each month for variable rate)
+      let monthlyPayment: number;
+      if (isFixedRatePeriod) {
+        // Use fixed rate payment calculation
+        monthlyPayment = calculationInputs.mortgageAmount * (fixedMonthlyRate * Math.pow(1 + fixedMonthlyRate, totalPayments)) / (Math.pow(1 + fixedMonthlyRate, totalPayments) - 1);
+      } else {
+        // For variable rate, recalculate payment based on remaining balance and term
+        const remainingPayments = totalPayments - month + 1;
+        monthlyPayment = balance * (currentRate * Math.pow(1 + currentRate, remainingPayments)) / (Math.pow(1 + currentRate, remainingPayments) - 1);
+      }
+
+      const totalPayment = monthlyPayment + calculationInputs.extraPayment;
+      const interestPayment = balance * currentRate;
+      const principalPayment = Math.min(totalPayment - interestPayment, balance);
+      const actualPayment = principalPayment + interestPayment;
+      
+      balance -= principalPayment;
+      
+      schedule.push({
+        month,
+        payment: actualPayment,
+        principal: principalPayment,
+        interest: interestPayment,
+        balance: Math.max(0, balance),
+        interestRate: currentRate * 12 * 100, // Convert back to annual percentage
+        date: currentDate,
+      });
+
+      if (balance <= 0) break;
+      
+      // Move to next month
+      currentDate = addMonthsToDate(currentDate, 1);
+    }
+
+    return schedule;
+  }, [calculationInputs, fixedMonthlyRate, variableMonthlyRate, fixedRateMonths, totalPayments]);
+
+  // Calculate total interest and amount from amortization schedule
+  const totalInterest = useMemo(() => {
+    return amortizationSchedule.reduce((sum, entry) => sum + entry.interest, 0);
+  }, [amortizationSchedule]);
+
+  const totalAmount = calculationInputs.mortgageAmount + totalInterest;
+
+  // Payment breakdown chart data
+  const paymentBreakdownData = useMemo(() => {
+    if (calculationInputs.paymentType === "interest-only") {
+      const firstPayment = amortizationSchedule[0];
+      if (!firstPayment) return { labels: [], datasets: [] };
+      
+      return {
+        labels: ['Interest'],
+        datasets: [{
+          data: [firstPayment.payment],
+          backgroundColor: ['#ef4444'],
+          borderWidth: 0,
+        }]
+      };
+    }
+
+    const firstPayment = amortizationSchedule[0];
+    if (!firstPayment) return { labels: [], datasets: [] };
+
+    return {
+      labels: ['Principal', 'Interest'],
+      datasets: [{
+        data: [firstPayment.principal, firstPayment.interest],
+        backgroundColor: ['#10b981', '#ef4444'],
+        borderWidth: 0,
+      }]
+    };
+  }, [calculationInputs.paymentType, amortizationSchedule]);
+
+
+  // Comparison scenarios
+  const comparisonScenarios = useMemo((): ComparisonScenario[] => {
+    const scenarios = [
+      { name: "Current", interestRate: calculationInputs.interestRate, termYears: calculationInputs.termYears },
+      { name: "Lower Rate", interestRate: Math.max(0.1, calculationInputs.interestRate - 0.5), termYears: calculationInputs.termYears },
+      { name: "Higher Rate", interestRate: calculationInputs.interestRate + 0.5, termYears: calculationInputs.termYears },
+      { name: "Shorter Term", interestRate: calculationInputs.interestRate, termYears: Math.max(15, calculationInputs.termYears - 5) },
+      { name: "Longer Term", interestRate: calculationInputs.interestRate, termYears: Math.min(40, calculationInputs.termYears + 5) },
+    ];
+
+    return scenarios.map(scenario => {
+      const rate = scenario.interestRate / 100 / 12;
+      const payments = scenario.termYears * 12;
+      
+      const monthlyPayment = calculationInputs.paymentType === "repayment"
+        ? calculationInputs.mortgageAmount * (rate * Math.pow(1 + rate, payments)) / (Math.pow(1 + rate, payments) - 1)
+        : calculationInputs.mortgageAmount * rate;
+
+      const totalInterest = calculationInputs.paymentType === "repayment"
+        ? (monthlyPayment * payments) - calculationInputs.mortgageAmount
+        : monthlyPayment * payments;
+
+      return {
+        ...scenario,
+        monthlyPayment,
+        totalInterest,
+        totalAmount: calculationInputs.mortgageAmount + totalInterest,
+      };
+    });
+  }, [calculationInputs]);
+
+  // Extra payment impact
+  const extraPaymentImpact = useMemo(() => {
+    if (calculationInputs.extraPayment <= 0 || calculationInputs.paymentType === "interest-only") {
+      return null;
+    }
+
+    const originalSchedule = amortizationSchedule;
+    const originalTotalInterest = originalSchedule.reduce((sum, entry) => sum + entry.interest, 0);
+    const originalTerm = originalSchedule.length;
+
+    // Calculate with extra payments - simplified calculation
+    // This is a rough estimate since the full calculation would be complex with rate changes
+    const averageRate = (fixedMonthlyRate * fixedRateMonths + variableMonthlyRate * variableRateMonths) / totalPayments;
+    let balance = calculationInputs.mortgageAmount;
+    let totalInterestWithExtra = 0;
+    let monthsWithExtra = 0;
+    const totalPayment = initialMonthlyPayment + calculationInputs.extraPayment;
+
+    while (balance > 0 && monthsWithExtra < totalPayments) {
+      const interestPayment = balance * averageRate;
+      const principalPayment = Math.min(totalPayment - interestPayment, balance);
+      
+      balance -= principalPayment;
+      totalInterestWithExtra += interestPayment;
+      monthsWithExtra++;
+
+      if (balance <= 0) break;
+    }
+
+    return {
+      interestSaved: originalTotalInterest - totalInterestWithExtra,
+      timeSaved: originalTerm - monthsWithExtra,
+      newTerm: monthsWithExtra,
+    };
+  }, [calculationInputs.extraPayment, calculationInputs.mortgageAmount, amortizationSchedule, fixedMonthlyRate, variableMonthlyRate, fixedRateMonths, variableRateMonths, totalPayments, initialMonthlyPayment, calculationInputs.paymentType]);
+
+  return (
+    <div className="min-h-full bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800 p-6">
+      <div className="max-w-7xl mx-auto">
+        {/* Header */}
+        <div className="mb-8">
+          <h1 className="text-3xl font-bold text-slate-900 dark:text-slate-100 mb-2">
+            Mortgage Calculator
+          </h1>
+          <p className="text-slate-600 dark:text-slate-400">
+            Calculate your mortgage payments and explore different scenarios
+          </p>
+        </div>
+
+        <Tabs defaultValue="calculator" className="space-y-6">
+          <TabsList className="grid w-full grid-cols-4">
+            <TabsTrigger value="calculator" className="flex items-center gap-2">
+              <Calculator className="h-4 w-4" />
+              Calculator
+            </TabsTrigger>
+            <TabsTrigger value="breakdown" className="flex items-center gap-2">
+              <PieChart className="h-4 w-4" />
+              Breakdown
+            </TabsTrigger>
+            <TabsTrigger value="schedule" className="flex items-center gap-2">
+              <Calendar className="h-4 w-4" />
+              Details
+            </TabsTrigger>
+            <TabsTrigger value="comparison" className="flex items-center gap-2">
+              <TrendingUp className="h-4 w-4" />
+              Compare
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="calculator" className="space-y-6">
+            {/* Input Form */}
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle>Mortgage Parameters</CardTitle>
+                    <CardDescription>
+                      {isFormExpanded 
+                        ? "Enter your mortgage details to calculate payments and scenarios"
+                        : `$${inputs.propertyValue.toLocaleString()} property • ${inputs.interestRate}% rate • ${inputs.termYears} years • ${inputs.paymentType === "repayment" ? "Repayment" : "Interest Only"}`
+                      }
+                    </CardDescription>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setIsFormExpanded(!isFormExpanded)}
+                      className="flex items-center gap-2"
+                    >
+                      {isFormExpanded ? (
+                        <>
+                          <ChevronUp className="h-4 w-4" />
+                          Collapse
+                        </>
+                      ) : (
+                        <>
+                          <ChevronDown className="h-4 w-4" />
+                          Edit
+                        </>
+                      )}
+                    </Button>
+                    <Button
+                      onClick={handleUpdateCalculations}
+                      disabled={isUpdating}
+                      size="sm"
+                      className="flex items-center gap-2"
+                    >
+                      {isUpdating ? (
+                        <>
+                          <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                          Updating...
+                        </>
+                      ) : (
+                        <>
+                          <Calculator className="h-4 w-4" />
+                          Update
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                </div>
+              </CardHeader>
+              {isFormExpanded && (
+                <CardContent>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {/* Property Value */}
+                    <div className="space-y-2">
+                      <Label htmlFor="propertyValue">Property Value</Label>
+                      <Input
+                        id="propertyValue"
+                        type="number"
+                        value={inputs.propertyValue}
+                        onChange={(e) => handleInputChange("propertyValue", parseFloat(e.target.value) || 0)}
+                        placeholder="500000"
+                      />
+                    </div>
+
+                    {/* Mortgage Amount */}
+                    <div className="space-y-2">
+                      <Label htmlFor="mortgageAmount">Mortgage Amount</Label>
+                      <Input
+                        id="mortgageAmount"
+                        type="number"
+                        value={inputs.mortgageAmount}
+                        onChange={(e) => handleInputChange("mortgageAmount", parseFloat(e.target.value) || 0)}
+                        placeholder="400000"
+                      />
+                    </div>
+
+                    {/* Interest Rate */}
+                    <div className="space-y-2">
+                      <Label htmlFor="interestRate">Interest Rate (%)</Label>
+                      <Input
+                        id="interestRate"
+                        type="number"
+                        step="0.01"
+                        value={inputs.interestRate}
+                        onChange={(e) => handleInputChange("interestRate", parseFloat(e.target.value) || 0)}
+                        placeholder="6.5"
+                      />
+                    </div>
+
+                    {/* Term */}
+                    <div className="space-y-2">
+                      <Label htmlFor="termYears">Term (Years)</Label>
+                      <Select
+                        value={inputs.termYears.toString()}
+                        onValueChange={(value) => handleInputChange("termYears", parseInt(value))}
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="15">15 years</SelectItem>
+                          <SelectItem value="20">20 years</SelectItem>
+                          <SelectItem value="25">25 years</SelectItem>
+                          <SelectItem value="30">30 years</SelectItem>
+                          <SelectItem value="35">35 years</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    {/* Payment Type */}
+                    <div className="space-y-2">
+                      <Label>Payment Type</Label>
+                      <div className="flex items-center space-x-2">
+                        <Switch
+                          checked={inputs.paymentType === "repayment"}
+                          onCheckedChange={(checked) => 
+                            handleInputChange("paymentType", checked ? "repayment" : "interest-only")
+                          }
+                        />
+                        <span className="text-sm">
+                          {inputs.paymentType === "repayment" ? "Repayment" : "Interest Only"}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Rate Type */}
+                    <div className="space-y-2">
+                      <Label>Rate Type</Label>
+                      <div className="flex items-center space-x-2">
+                        <Switch
+                          checked={inputs.rateType === "fixed"}
+                          onCheckedChange={(checked) => 
+                            handleInputChange("rateType", checked ? "fixed" : "variable")
+                          }
+                        />
+                        <span className="text-sm">
+                          {inputs.rateType === "fixed" ? "Fixed Rate" : "Variable Rate"}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Extra Payment */}
+                    <div className="space-y-2">
+                      <Label htmlFor="extraPayment">Extra Monthly Payment</Label>
+                      <Input
+                        id="extraPayment"
+                        type="number"
+                        value={inputs.extraPayment}
+                        onChange={(e) => handleInputChange("extraPayment", parseFloat(e.target.value) || 0)}
+                        placeholder="0"
+                      />
+                    </div>
+
+                    {/* Mortgage Start Date */}
+                    <div className="space-y-2">
+                      <Label htmlFor="startDate">Mortgage Start Date</Label>
+                      <Input
+                        id="startDate"
+                        type="date"
+                        value={inputs.startDate}
+                        onChange={(e) => handleInputChange("startDate", e.target.value)}
+                      />
+                    </div>
+
+                    {/* Fixed Rate End Date */}
+                    <div className="space-y-2">
+                      <Label htmlFor="fixedRateEndDate">Fixed Rate End Date</Label>
+                      <Input
+                        id="fixedRateEndDate"
+                        type="date"
+                        value={inputs.fixedRateEndDate}
+                        onChange={(e) => handleInputChange("fixedRateEndDate", e.target.value)}
+                      />
+                    </div>
+
+                    {/* Variable Rate Toggle */}
+                    <div className="space-y-2">
+                      <Label>Variable Rate After Fixed Period</Label>
+                      <div className="flex items-center space-x-2">
+                        <Switch
+                          checked={inputs.variableRateEnabled}
+                          onCheckedChange={(checked) => 
+                            handleInputChange("variableRateEnabled", checked)
+                          }
+                        />
+                        <span className="text-sm">
+                          {inputs.variableRateEnabled ? "Enabled" : "Disabled"}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Variable Rate */}
+                    {inputs.variableRateEnabled && (
+                      <div className="space-y-2">
+                        <Label htmlFor="variableRate">Variable Rate (%)</Label>
+                        <Input
+                          id="variableRate"
+                          type="number"
+                          step="0.01"
+                          value={inputs.variableRate}
+                          onChange={(e) => handleInputChange("variableRate", parseFloat(e.target.value) || 0)}
+                          placeholder="8.0"
+                        />
+                      </div>
+                    )}
+                  </div>
+                </CardContent>
+              )}
+            </Card>
+
+            {/* Key Metrics */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium text-slate-600 dark:text-slate-400">
+                    Monthly Payment
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold text-slate-900 dark:text-slate-100">
+                    ${initialMonthlyPayment.toLocaleString('en-US', { maximumFractionDigits: 0 })}
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium text-slate-600 dark:text-slate-400">
+                    Total Interest
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold text-slate-900 dark:text-slate-100">
+                    ${totalInterest.toLocaleString('en-US', { maximumFractionDigits: 0 })}
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium text-slate-600 dark:text-slate-400">
+                    Total Amount
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold text-slate-900 dark:text-slate-100">
+                    ${totalAmount.toLocaleString('en-US', { maximumFractionDigits: 0 })}
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium text-slate-600 dark:text-slate-400">
+                    Loan-to-Value
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold text-slate-900 dark:text-slate-100">
+                    {ltv.toFixed(1)}%
+                  </div>
+                  <div className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                    Deposit: ${deposit.toLocaleString('en-US', { maximumFractionDigits: 0 })}
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Combined Amortization Chart */}
+            <AmortizationChart 
+              amortizationSchedule={amortizationSchedule}
+              mortgageAmount={calculationInputs.mortgageAmount}
+            />
+          </TabsContent>
+
+          <TabsContent value="breakdown" className="space-y-6">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Payment Breakdown Chart */}
+              <Card>
+                <CardHeader>
+                  <CardTitle>Payment Breakdown</CardTitle>
+                  <CardDescription>
+                    Visual breakdown of your monthly payment
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="h-64">
+                    <Doughnut 
+                      data={paymentBreakdownData}
+                      options={{
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                          legend: {
+                            position: 'bottom',
+                          },
+                          tooltip: {
+                            callbacks: {
+                              label: function(context) {
+                                return `${context.label}: $${context.parsed.toLocaleString()}`;
+                              }
+                            }
+                          }
+                        }
+                      }}
+                    />
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Extra Payment Impact */}
+              {extraPaymentImpact && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <DollarSign className="h-5 w-5" />
+                      Extra Payment Impact
+                    </CardTitle>
+                    <CardDescription>
+                      Impact of additional monthly payments
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="text-center p-4 bg-green-50 dark:bg-green-950 rounded-lg">
+                        <div className="text-2xl font-bold text-green-600 dark:text-green-400">
+                          ${extraPaymentImpact.interestSaved.toLocaleString('en-US', { maximumFractionDigits: 0 })}
+                        </div>
+                        <div className="text-sm text-green-600 dark:text-green-400">Interest Saved</div>
+                      </div>
+                      <div className="text-center p-4 bg-blue-50 dark:bg-blue-950 rounded-lg">
+                        <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">
+                          {Math.floor(extraPaymentImpact.timeSaved / 12)}y {extraPaymentImpact.timeSaved % 12}m
+                        </div>
+                        <div className="text-sm text-blue-600 dark:text-blue-400">Time Saved</div>
+                      </div>
+                    </div>
+                    <div className="text-center p-4 bg-slate-50 dark:bg-slate-800 rounded-lg">
+                      <div className="text-lg font-semibold text-slate-900 dark:text-slate-100">
+                        New Term: {Math.floor(extraPaymentImpact.newTerm / 12)} years {extraPaymentImpact.newTerm % 12} months
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+            </div>
+          </TabsContent>
+
+          <TabsContent value="schedule" className="space-y-6">
+            {/* Detailed Schedule Table */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Complete Amortization Schedule</CardTitle>
+                <CardDescription>
+                  Detailed month-by-month breakdown of your mortgage payments
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b">
+                        <th className="text-left p-2">Month</th>
+                        <th className="text-right p-2">Payment</th>
+                        <th className="text-right p-2">Principal</th>
+                        <th className="text-right p-2">Interest</th>
+                        <th className="text-right p-2">Balance</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {amortizationSchedule.map((entry) => (
+                        <tr key={entry.month} className="border-b hover:bg-slate-50 dark:hover:bg-slate-800">
+                          <td className="p-2">{entry.month}</td>
+                          <td className="text-right p-2">${entry.payment.toLocaleString('en-US', { maximumFractionDigits: 2 })}</td>
+                          <td className="text-right p-2">${entry.principal.toLocaleString('en-US', { maximumFractionDigits: 2 })}</td>
+                          <td className="text-right p-2">${entry.interest.toLocaleString('en-US', { maximumFractionDigits: 2 })}</td>
+                          <td className="text-right p-2">${entry.balance.toLocaleString('en-US', { maximumFractionDigits: 2 })}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="comparison" className="space-y-6">
+            <Card>
+              <CardHeader>
+                <CardTitle>Rate & Term Comparison</CardTitle>
+                <CardDescription>
+                  Compare different interest rates and terms to find the best option
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {comparisonScenarios.map((scenario, index) => (
+                    <div key={index} className={`p-4 rounded-lg border-2 ${
+                      scenario.name === "Current" 
+                        ? "border-blue-500 bg-blue-50 dark:bg-blue-950" 
+                        : "border-slate-200 dark:border-slate-700"
+                    }`}>
+                      <div className="text-center">
+                        <h3 className={`font-semibold ${
+                          scenario.name === "Current" 
+                            ? "text-blue-600 dark:text-blue-400" 
+                            : "text-slate-900 dark:text-slate-100"
+                        }`}>
+                          {scenario.name}
+                        </h3>
+                        <div className="text-sm text-slate-600 dark:text-slate-400 mt-1">
+                          {scenario.interestRate}% • {scenario.termYears} years
+                        </div>
+                      </div>
+                      
+                      <div className="mt-4 space-y-2">
+                        <div className="flex justify-between text-sm">
+                          <span>Monthly Payment:</span>
+                          <span className="font-medium">
+                            ${scenario.monthlyPayment.toLocaleString('en-US', { maximumFractionDigits: 0 })}
+                          </span>
+                        </div>
+                        <div className="flex justify-between text-sm">
+                          <span>Total Interest:</span>
+                          <span className="font-medium">
+                            ${scenario.totalInterest.toLocaleString('en-US', { maximumFractionDigits: 0 })}
+                          </span>
+                        </div>
+                        <div className="flex justify-between text-sm">
+                          <span>Total Amount:</span>
+                          <span className="font-medium">
+                            ${scenario.totalAmount.toLocaleString('en-US', { maximumFractionDigits: 0 })}
+                          </span>
+                        </div>
+                      </div>
+
+                      {scenario.name !== "Current" && (
+                        <div className="mt-3 pt-3 border-t border-slate-200 dark:border-slate-600">
+                          <div className="text-xs space-y-1">
+                            <div className="flex justify-between">
+                              <span>vs Current:</span>
+                              <span className={`font-medium ${
+                                scenario.monthlyPayment < comparisonScenarios[0].monthlyPayment 
+                                  ? "text-green-600 dark:text-green-400" 
+                                  : "text-red-600 dark:text-red-400"
+                              }`}>
+                                {scenario.monthlyPayment < comparisonScenarios[0].monthlyPayment ? "-" : "+"}
+                                ${Math.abs(scenario.monthlyPayment - comparisonScenarios[0].monthlyPayment).toLocaleString('en-US', { maximumFractionDigits: 0 })}
+                              </span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span>Interest Diff:</span>
+                              <span className={`font-medium ${
+                                scenario.totalInterest < comparisonScenarios[0].totalInterest 
+                                  ? "text-green-600 dark:text-green-400" 
+                                  : "text-red-600 dark:text-red-400"
+                              }`}>
+                                {scenario.totalInterest < comparisonScenarios[0].totalInterest ? "-" : "+"}
+                                ${Math.abs(scenario.totalInterest - comparisonScenarios[0].totalInterest).toLocaleString('en-US', { maximumFractionDigits: 0 })}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Affordability Analysis */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Clock className="h-5 w-5" />
+                  Affordability Analysis
+                </CardTitle>
+                <CardDescription>
+                  General guidelines for mortgage affordability
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="space-y-4">
+                    <h4 className="font-semibold">28% Rule (Housing Expense Ratio)</h4>
+                    <div className="p-4 bg-slate-50 dark:bg-slate-800 rounded-lg">
+                      <div className="text-sm text-slate-600 dark:text-slate-400 mb-2">
+                        Recommended: Monthly housing costs should not exceed 28% of gross monthly income
+                      </div>
+                      <div className="text-lg font-semibold">
+                        Required Income: ${Math.ceil(initialMonthlyPayment / 0.28).toLocaleString('en-US', { maximumFractionDigits: 0 })}/month
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div className="space-y-4">
+                    <h4 className="font-semibold">36% Rule (Debt-to-Income Ratio)</h4>
+                    <div className="p-4 bg-slate-50 dark:bg-slate-800 rounded-lg">
+                      <div className="text-sm text-slate-600 dark:text-slate-400 mb-2">
+                        Recommended: Total debt payments should not exceed 36% of gross monthly income
+                      </div>
+                      <div className="text-lg font-semibold">
+                        Required Income: ${Math.ceil(initialMonthlyPayment / 0.36).toLocaleString('en-US', { maximumFractionDigits: 0 })}/month
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+        </Tabs>
+      </div>
+    </div>
+  );
+}
