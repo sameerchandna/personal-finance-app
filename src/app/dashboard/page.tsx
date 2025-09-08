@@ -174,6 +174,7 @@ export default function DashboardPage() {
             <CardContent>
               <div className="max-w-4xl mx-auto">
                 <UserProfile 
+                  routing="hash"
                   appearance={{
                     elements: {
                       formButtonPrimary: 'bg-blue-600 hover:bg-blue-700 text-sm normal-case',

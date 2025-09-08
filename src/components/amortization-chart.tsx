@@ -1,9 +1,7 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useMemo } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Switch } from "@/components/ui/switch";
-import { Label } from "@/components/ui/label";
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -41,7 +39,6 @@ interface AmortizationChartProps {
 }
 
 export default function AmortizationChart({ amortizationSchedule, mortgageAmount }: AmortizationChartProps) {
-  const [showRemainingBalance, setShowRemainingBalance] = useState(false);
 
   // Amortization stacked bar chart data (payments made)
   const amortizationChartData = useMemo(() => {
@@ -69,15 +66,15 @@ export default function AmortizationChart({ amortizationSchedule, mortgageAmount
         {
           label: 'Principal Paid',
           data: yearlyData.map(d => d.principal),
-          backgroundColor: '#10b981',
-          borderColor: '#059669',
+          backgroundColor: 'rgba(34, 197, 94, 0.8)',
+          borderColor: 'rgb(34, 197, 94)',
           borderWidth: 1,
         },
         {
           label: 'Interest Paid',
           data: yearlyData.map(d => d.interest),
-          backgroundColor: '#ef4444',
-          borderColor: '#dc2626',
+          backgroundColor: 'rgba(239, 68, 68, 0.8)',
+          borderColor: 'rgb(239, 68, 68)',
           borderWidth: 1,
         },
       ]
@@ -135,103 +132,150 @@ export default function AmortizationChart({ amortizationSchedule, mortgageAmount
         {
           label: 'Remaining Principal to Pay',
           data: remainingData.map(d => d.remainingPrincipal),
-          backgroundColor: '#10b981', // Green for remaining principal
-          borderColor: '#059669',
+          backgroundColor: 'rgba(34, 197, 94, 0.8)', // Green for remaining principal
+          borderColor: 'rgb(34, 197, 94)',
           borderWidth: 1,
         },
         {
           label: 'Remaining Interest to Pay',
           data: remainingData.map(d => d.remainingInterest),
-          backgroundColor: '#ef4444', // Red for remaining interest
-          borderColor: '#dc2626',
+          backgroundColor: 'rgba(239, 68, 68, 0.8)', // Red for remaining interest
+          borderColor: 'rgb(239, 68, 68)',
           borderWidth: 1,
         },
       ]
     };
   }, [amortizationSchedule, mortgageAmount]);
 
-  const currentChartData = showRemainingBalance ? remainingBalanceChartData : amortizationChartData;
-  const chartTitle = showRemainingBalance ? "Remaining Balance Over Time" : "Amortization Schedule";
-  const chartDescription = showRemainingBalance 
-    ? "Amount of principal and interest remaining to be paid throughout the loan term"
-    : "Yearly breakdown of principal and interest payments over the loan term";
-
   return (
-    <Card>
-      <CardHeader>
-        <div className="flex items-center justify-between">
-          <div>
-            <CardTitle>{chartTitle}</CardTitle>
-            <CardDescription>{chartDescription}</CardDescription>
-          </div>
-          <div className="flex items-center space-x-2">
-            <Label htmlFor="chart-toggle" className="text-sm">
-              Show Remaining Balance
-            </Label>
-            <Switch
-              id="chart-toggle"
-              checked={showRemainingBalance}
-              onCheckedChange={setShowRemainingBalance}
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      {/* Amortization Schedule Chart */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Amortization Schedule</CardTitle>
+          <CardDescription>
+            Yearly breakdown of principal and interest payments over the loan term
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="h-80">
+            <Bar 
+              data={amortizationChartData}
+              options={{
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: {
+                  mode: 'index',
+                  intersect: false,
+                },
+                scales: {
+                  x: {
+                    stacked: true,
+                    display: true,
+                    title: {
+                      display: true,
+                      text: 'Year'
+                    }
+                  },
+                  y: {
+                    stacked: true,
+                    display: true,
+                    title: {
+                      display: true,
+                      text: 'Amount ($)'
+                    },
+                    ticks: {
+                      callback: function(value) {
+                        return '$' + value.toLocaleString();
+                      }
+                    }
+                  }
+                },
+                plugins: {
+                  legend: {
+                    position: 'top',
+                  },
+                  tooltip: {
+                    callbacks: {
+                      label: function(context) {
+                        return `${context.dataset.label}: $${context.parsed.y.toLocaleString()}`;
+                      },
+                      footer: function(tooltipItems) {
+                        const total = tooltipItems.reduce((sum, item) => sum + item.parsed.y, 0);
+                        return `Total: $${total.toLocaleString()}`;
+                      }
+                    }
+                  }
+                }
+              }}
             />
           </div>
-        </div>
-      </CardHeader>
-      <CardContent>
-        <div className="h-80">
-          <Bar 
-            data={currentChartData}
-            options={{
-              responsive: true,
-              maintainAspectRatio: false,
-              interaction: {
-                mode: 'index',
-                intersect: false,
-              },
-              scales: {
-                x: {
-                  stacked: true,
-                  display: true,
-                  title: {
-                    display: true,
-                    text: 'Year'
-                  }
+        </CardContent>
+      </Card>
+
+      {/* Remaining Balance Chart */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Remaining Balance Over Time</CardTitle>
+          <CardDescription>
+            Amount of principal and interest remaining to be paid throughout the loan term
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="h-80">
+            <Bar 
+              data={remainingBalanceChartData}
+              options={{
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: {
+                  mode: 'index',
+                  intersect: false,
                 },
-                y: {
-                  stacked: true,
-                  display: true,
-                  title: {
+                scales: {
+                  x: {
+                    stacked: true,
                     display: true,
-                    text: showRemainingBalance ? 'Remaining Amount ($)' : 'Amount ($)'
+                    title: {
+                      display: true,
+                      text: 'Year'
+                    }
                   },
-                  ticks: {
-                    callback: function(value) {
-                      return '$' + value.toLocaleString();
-                    }
-                  }
-                }
-              },
-              plugins: {
-                legend: {
-                  position: 'top',
-                },
-                tooltip: {
-                  callbacks: {
-                    label: function(context) {
-                      return `${context.dataset.label}: $${context.parsed.y.toLocaleString()}`;
+                  y: {
+                    stacked: true,
+                    display: true,
+                    title: {
+                      display: true,
+                      text: 'Remaining Amount ($)'
                     },
-                    footer: function(tooltipItems) {
-                      const total = tooltipItems.reduce((sum, item) => sum + item.parsed.y, 0);
-                      return showRemainingBalance 
-                        ? `Total Remaining: $${total.toLocaleString()}`
-                        : `Total: $${total.toLocaleString()}`;
+                    ticks: {
+                      callback: function(value) {
+                        return '$' + value.toLocaleString();
+                      }
+                    }
+                  }
+                },
+                plugins: {
+                  legend: {
+                    position: 'top',
+                  },
+                  tooltip: {
+                    callbacks: {
+                      label: function(context) {
+                        return `${context.dataset.label}: $${context.parsed.y.toLocaleString()}`;
+                      },
+                      footer: function(tooltipItems) {
+                        const total = tooltipItems.reduce((sum, item) => sum + item.parsed.y, 0);
+                        return `Total Remaining: $${total.toLocaleString()}`;
+                      }
                     }
                   }
                 }
-              }
-            }}
-          />
-        </div>
-      </CardContent>
-    </Card>
+              }}
+            />
+          </div>
+        </CardContent>
+      </Card>
+    </div>
   );
 }

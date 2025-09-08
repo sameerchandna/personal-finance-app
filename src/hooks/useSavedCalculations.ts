@@ -19,15 +19,12 @@ export interface SavedInvestmentCalculation {
 export interface SavedMortgageCalculation {
   id: string;
   name: string;
-  loan_amount: number;
+  property_type: string;
+  property_value: number;
+  mortgage_amount: number;
   interest_rate: number;
-  loan_term_years: number;
-  down_payment: number;
-  property_tax: number;
-  home_insurance: number;
-  pmi: number;
+  term_years: number;
   payment_type: string;
-  rate_type: string;
   extra_payment: number;
   start_date: string;
   fixed_rate_end_date: string | null;

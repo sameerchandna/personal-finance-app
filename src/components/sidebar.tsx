@@ -15,7 +15,8 @@ import {
   X,
   Calculator,
   TrendingUp,
-  User
+  User,
+  BarChart3
 } from "lucide-react";
 
 const navigation = [
@@ -28,6 +29,11 @@ const navigation = [
     name: "Dashboard",
     href: "/dashboard",
     icon: User,
+  },
+  {
+    name: "Financial Profile",
+    href: "/financial-profile",
+    icon: BarChart3,
   },
   {
     name: "Mortgage",

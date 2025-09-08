@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useUser } from '@clerk/nextjs';
 import { SignIn } from '@clerk/nextjs';
 import { useSavedCalculations } from '@/hooks/useSavedCalculations';
+import { financialProfileService } from '@/lib/database';
 import { SaveLoadDialog } from '@/components/save-load-dialog';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -12,6 +13,7 @@ import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Calculator, TrendingUp, PieChart, Calendar, DollarSign, Clock, ChevronDown, ChevronUp, Save } from "lucide-react";
 import {
   Chart as ChartJS,
@@ -44,7 +46,6 @@ interface MortgageInputs {
   interestRate: number;
   termYears: number;
   paymentType: "repayment" | "interest-only";
-  rateType: "fixed" | "variable";
   extraPayment: number;
   startDate: string;
   fixedRateEndDate: string;
@@ -72,7 +73,13 @@ interface ComparisonScenario {
 }
 
 export default function MortgagePage() {
-  const { isSignedIn, isLoaded } = useUser();
+  const { isSignedIn, isLoaded, user } = useUser();
+  const { 
+    mortgageCalculations, 
+    saveMortgageCalculation, 
+    deleteMortgageCalculation,
+    loading: calculationsLoading 
+  } = useSavedCalculations(user);
 
   // Show loading state while checking authentication
   if (!isLoaded) {
@@ -111,17 +118,64 @@ export default function MortgagePage() {
       </div>
     );
   }
-
-  // Only call hooks after authentication checks
-  const { user } = useUser();
-  const { 
-    mortgageCalculations, 
-    saveMortgageCalculation, 
-    deleteMortgageCalculation,
-    loading: calculationsLoading 
-  } = useSavedCalculations(user);
   
   const [showSaveLoadDialog, setShowSaveLoadDialog] = useState(false);
+  const [userMortgageProfiles, setUserMortgageProfiles] = useState<any[]>([]);
+  const [loadingProfiles, setLoadingProfiles] = useState(false);
+  const [showEditDialog, setShowEditDialog] = useState(false);
+  const [selectedMortgageId, setSelectedMortgageId] = useState<string>("");
+  const [tempInputs, setTempInputs] = useState<MortgageInputs | null>(null);
+  const [currentProfileName, setCurrentProfileName] = useState<string>("Default Calculator");
+  const [isDefaultProfile, setIsDefaultProfile] = useState<boolean>(true);
+  const [profileLastUpdated, setProfileLastUpdated] = useState<string>("");
+
+  // Load user's mortgage profiles on component mount
+  useEffect(() => {
+    const loadUserMortgageProfiles = async () => {
+      if (!user?.id) return;
+      
+      try {
+        setLoadingProfiles(true);
+        const profiles = await financialProfileService.getMortgageProfiles(user.id);
+        setUserMortgageProfiles(profiles);
+        
+        // If user has mortgage profiles, load the first one as default
+        if (profiles.length > 0) {
+          const firstProfile = profiles[0];
+          const loadedInputs = {
+            propertyValue: firstProfile.property_value,
+            mortgageAmount: firstProfile.mortgage_amount,
+            interestRate: firstProfile.interest_rate,
+            termYears: firstProfile.term_years,
+            paymentType: firstProfile.payment_type as "repayment" | "interest-only",
+            extraPayment: firstProfile.extra_payment,
+            startDate: firstProfile.start_date,
+            fixedRateEndDate: firstProfile.fixed_rate_end_date || getFixedRateEndDate(),
+            variableRate: firstProfile.variable_rate || 8.0,
+            variableRateEnabled: firstProfile.variable_rate_enabled,
+          };
+          
+          setInputs(loadedInputs);
+          setCalculationInputs(loadedInputs);
+          setCurrentProfileName(firstProfile.name);
+          setIsDefaultProfile(false);
+          setProfileLastUpdated(firstProfile.updated_at || firstProfile.created_at);
+        } else {
+          setCurrentProfileName("Default Calculator");
+          setIsDefaultProfile(true);
+          setProfileLastUpdated("");
+        }
+      } catch (err) {
+        console.error('Error loading mortgage profiles:', err);
+      } finally {
+        setLoadingProfiles(false);
+      }
+    };
+
+    if (user) {
+      loadUserMortgageProfiles();
+    }
+  }, [user]);
 
   // Helper function to get today's date in YYYY-MM-DD format
   const getTodayString = () => {
@@ -143,7 +197,6 @@ export default function MortgagePage() {
     interestRate: 2.79,
     termYears: 35,
     paymentType: "repayment",
-    rateType: "fixed",
     extraPayment: 0,
     startDate: getTodayString(),
     fixedRateEndDate: getFixedRateEndDate(),
@@ -157,7 +210,6 @@ export default function MortgagePage() {
     interestRate: 2.79,
     termYears: 35,
     paymentType: "repayment",
-    rateType: "fixed",
     extraPayment: 0,
     startDate: getTodayString(),
     fixedRateEndDate: getFixedRateEndDate(),
@@ -165,7 +217,6 @@ export default function MortgagePage() {
     variableRateEnabled: false,
   });
 
-  const [isFormExpanded, setIsFormExpanded] = useState(false);
   const [isUpdating, setIsUpdating] = useState(false);
 
   const handleInputChange = (field: keyof MortgageInputs, value: string | number | boolean) => {
@@ -173,6 +224,55 @@ export default function MortgagePage() {
       ...prev,
       [field]: value
     }));
+  };
+
+  const handleTempInputChange = (field: keyof MortgageInputs, value: string | number | boolean) => {
+    setTempInputs(prev => prev ? ({
+      ...prev,
+      [field]: value
+    }) : null);
+  };
+
+  const handleOpenEditDialog = () => {
+    setTempInputs({ ...inputs });
+    setShowEditDialog(true);
+  };
+
+  const handleCloseEditDialog = () => {
+    setShowEditDialog(false);
+    setTempInputs(null);
+    setSelectedMortgageId("");
+  };
+
+  const handleApplyChanges = () => {
+    if (tempInputs) {
+      setInputs(tempInputs);
+      setCalculationInputs(tempInputs);
+      // When applying changes, it becomes a custom calculation
+      setCurrentProfileName("Custom Calculation");
+      setIsDefaultProfile(false);
+    }
+    handleCloseEditDialog();
+  };
+
+  const handleSelectMortgage = (mortgageId: string) => {
+    setSelectedMortgageId(mortgageId);
+    const selectedMortgage = userMortgageProfiles.find(profile => profile.id === mortgageId);
+    if (selectedMortgage && tempInputs) {
+      const loadedInputs = {
+        propertyValue: selectedMortgage.property_value,
+        mortgageAmount: selectedMortgage.mortgage_amount,
+        interestRate: selectedMortgage.interest_rate,
+        termYears: selectedMortgage.term_years,
+        paymentType: selectedMortgage.payment_type as "repayment" | "interest-only",
+        extraPayment: selectedMortgage.extra_payment,
+        startDate: selectedMortgage.start_date,
+        fixedRateEndDate: selectedMortgage.fixed_rate_end_date || getFixedRateEndDate(),
+        variableRate: selectedMortgage.variable_rate || 8.0,
+        variableRateEnabled: selectedMortgage.variable_rate_enabled,
+      };
+      setTempInputs(loadedInputs);
+    }
   };
 
   const handleUpdateCalculations = async () => {
@@ -186,15 +286,12 @@ export default function MortgagePage() {
   const handleSaveCalculation = async (name: string) => {
     await saveMortgageCalculation({
       name,
-      loan_amount: calculationInputs.mortgageAmount,
+      property_type: "primary", // Default to primary property
+      property_value: calculationInputs.propertyValue,
+      mortgage_amount: calculationInputs.mortgageAmount,
       interest_rate: calculationInputs.interestRate,
-      loan_term_years: calculationInputs.termYears,
-      down_payment: calculationInputs.propertyValue - calculationInputs.mortgageAmount,
-      property_tax: 0, // Not in current form, default to 0
-      home_insurance: 0, // Not in current form, default to 0
-      pmi: 0, // Not in current form, default to 0
+      term_years: calculationInputs.termYears,
       payment_type: calculationInputs.paymentType,
-      rate_type: calculationInputs.rateType,
       extra_payment: calculationInputs.extraPayment,
       start_date: calculationInputs.startDate,
       fixed_rate_end_date: calculationInputs.fixedRateEndDate,
@@ -204,16 +301,12 @@ export default function MortgagePage() {
   };
 
   const handleLoadCalculation = (calculation: any) => {
-    const downPayment = calculation.down_payment || 0;
-    const propertyValue = calculation.loan_amount + downPayment;
-    
     const loadedInputs = {
-      propertyValue: propertyValue,
-      mortgageAmount: calculation.loan_amount,
+      propertyValue: calculation.property_value,
+      mortgageAmount: calculation.mortgage_amount,
       interestRate: calculation.interest_rate,
-      termYears: calculation.loan_term_years,
+      termYears: calculation.term_years,
       paymentType: calculation.payment_type || "repayment",
-      rateType: calculation.rate_type || "fixed",
       extraPayment: calculation.extra_payment || 0,
       startDate: calculation.start_date || getTodayString(),
       fixedRateEndDate: calculation.fixed_rate_end_date || getFixedRateEndDate(),
@@ -223,6 +316,9 @@ export default function MortgagePage() {
     
     setInputs(loadedInputs);
     setCalculationInputs(loadedInputs);
+    setCurrentProfileName(calculation.name);
+    setIsDefaultProfile(false);
+    setProfileLastUpdated(calculation.updated_at || calculation.created_at);
     setShowSaveLoadDialog(false);
   };
 
@@ -478,13 +574,26 @@ export default function MortgagePage() {
               <CardHeader>
                 <div className="flex items-center justify-between">
                   <div>
-                    <CardTitle>Mortgage Parameters</CardTitle>
+                    <div className="flex items-center gap-2 mb-1">
+                      <CardTitle>Active Profile: "{currentProfileName}"</CardTitle>
+                      {isDefaultProfile ? (
+                        <span className="text-xs bg-blue-100 text-blue-600 px-2 py-1 rounded-full">
+                          Default
+                        </span>
+                      ) : (
+                        <span className="text-xs bg-green-100 text-green-600 px-2 py-1 rounded-full">
+                          Saved
+                        </span>
+                      )}
+                    </div>
                     <CardDescription>
-                      {isFormExpanded 
-                        ? "Enter your mortgage details to calculate payments and scenarios"
-                        : `$${inputs.propertyValue.toLocaleString()} property • ${inputs.interestRate}% rate • ${inputs.termYears} years • ${inputs.paymentType === "repayment" ? "Repayment" : "Interest Only"}`
-                      }
+                      ${inputs.propertyValue.toLocaleString()} home with a ${inputs.mortgageAmount.toLocaleString()} loan at {inputs.interestRate}% interest for {inputs.termYears} years (${inputs.paymentType === "repayment" ? "Monthly payments" : "Interest only"})
                     </CardDescription>
+                    {profileLastUpdated && !isDefaultProfile && (
+                      <div className="text-xs text-gray-500 mt-1">
+                        Last updated: {new Date(profileLastUpdated).toLocaleDateString()} at {new Date(profileLastUpdated).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </div>
+                    )}
                   </div>
                   <div className="flex items-center gap-2">
                     <Button
@@ -497,203 +606,17 @@ export default function MortgagePage() {
                       Save/Load
                     </Button>
                     <Button
-                      variant="ghost"
+                      variant="default"
                       size="sm"
-                      onClick={() => setIsFormExpanded(!isFormExpanded)}
+                      onClick={handleOpenEditDialog}
                       className="flex items-center gap-2"
                     >
-                      {isFormExpanded ? (
-                        <>
-                          <ChevronUp className="h-4 w-4" />
-                          Collapse
-                        </>
-                      ) : (
-                        <>
-                          <ChevronDown className="h-4 w-4" />
-                          Edit
-                        </>
-                      )}
-                    </Button>
-                    <Button
-                      onClick={handleUpdateCalculations}
-                      disabled={isUpdating}
-                      size="sm"
-                      className="flex items-center gap-2"
-                    >
-                      {isUpdating ? (
-                        <>
-                          <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                          Updating...
-                        </>
-                      ) : (
-                        <>
-                          <Calculator className="h-4 w-4" />
-                          Update
-                        </>
-                      )}
+                      <ChevronDown className="h-4 w-4" />
+                      Edit Parameters
                     </Button>
                   </div>
                 </div>
               </CardHeader>
-              {isFormExpanded && (
-                <CardContent>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {/* Property Value */}
-                    <div className="space-y-2">
-                      <Label htmlFor="propertyValue">Property Value</Label>
-                      <Input
-                        id="propertyValue"
-                        type="number"
-                        value={inputs.propertyValue}
-                        onChange={(e) => handleInputChange("propertyValue", parseFloat(e.target.value) || 0)}
-                        placeholder="500000"
-                      />
-                    </div>
-
-                    {/* Mortgage Amount */}
-                    <div className="space-y-2">
-                      <Label htmlFor="mortgageAmount">Mortgage Amount</Label>
-                      <Input
-                        id="mortgageAmount"
-                        type="number"
-                        value={inputs.mortgageAmount}
-                        onChange={(e) => handleInputChange("mortgageAmount", parseFloat(e.target.value) || 0)}
-                        placeholder="400000"
-                      />
-                    </div>
-
-                    {/* Interest Rate */}
-                    <div className="space-y-2">
-                      <Label htmlFor="interestRate">Interest Rate (%)</Label>
-                      <Input
-                        id="interestRate"
-                        type="number"
-                        step="0.01"
-                        value={inputs.interestRate}
-                        onChange={(e) => handleInputChange("interestRate", parseFloat(e.target.value) || 0)}
-                        placeholder="6.5"
-                      />
-                    </div>
-
-                    {/* Term */}
-                    <div className="space-y-2">
-                      <Label htmlFor="termYears">Term (Years)</Label>
-                      <Select
-                        value={inputs.termYears.toString()}
-                        onValueChange={(value) => handleInputChange("termYears", parseInt(value))}
-                      >
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="15">15 years</SelectItem>
-                          <SelectItem value="20">20 years</SelectItem>
-                          <SelectItem value="25">25 years</SelectItem>
-                          <SelectItem value="30">30 years</SelectItem>
-                          <SelectItem value="35">35 years</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    {/* Payment Type */}
-                    <div className="space-y-2">
-                      <Label>Payment Type</Label>
-                      <div className="flex items-center space-x-2">
-                        <Switch
-                          checked={inputs.paymentType === "repayment"}
-                          onCheckedChange={(checked) => 
-                            handleInputChange("paymentType", checked ? "repayment" : "interest-only")
-                          }
-                        />
-                        <span className="text-sm">
-                          {inputs.paymentType === "repayment" ? "Repayment" : "Interest Only"}
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Rate Type */}
-                    <div className="space-y-2">
-                      <Label>Rate Type</Label>
-                      <div className="flex items-center space-x-2">
-                        <Switch
-                          checked={inputs.rateType === "fixed"}
-                          onCheckedChange={(checked) => 
-                            handleInputChange("rateType", checked ? "fixed" : "variable")
-                          }
-                        />
-                        <span className="text-sm">
-                          {inputs.rateType === "fixed" ? "Fixed Rate" : "Variable Rate"}
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Extra Payment */}
-                    <div className="space-y-2">
-                      <Label htmlFor="extraPayment">Extra Monthly Payment</Label>
-                      <Input
-                        id="extraPayment"
-                        type="number"
-                        value={inputs.extraPayment}
-                        onChange={(e) => handleInputChange("extraPayment", parseFloat(e.target.value) || 0)}
-                        placeholder="0"
-                      />
-                    </div>
-
-                    {/* Mortgage Start Date */}
-                    <div className="space-y-2">
-                      <Label htmlFor="startDate">Mortgage Start Date</Label>
-                      <Input
-                        id="startDate"
-                        type="date"
-                        value={inputs.startDate}
-                        onChange={(e) => handleInputChange("startDate", e.target.value)}
-                      />
-                    </div>
-
-                    {/* Fixed Rate End Date */}
-                    <div className="space-y-2">
-                      <Label htmlFor="fixedRateEndDate">Fixed Rate End Date</Label>
-                      <Input
-                        id="fixedRateEndDate"
-                        type="date"
-                        value={inputs.fixedRateEndDate}
-                        onChange={(e) => handleInputChange("fixedRateEndDate", e.target.value)}
-                      />
-                    </div>
-
-                    {/* Variable Rate Toggle */}
-                    <div className="space-y-2">
-                      <Label>Variable Rate After Fixed Period</Label>
-                      <div className="flex items-center space-x-2">
-                        <Switch
-                          checked={inputs.variableRateEnabled}
-                          onCheckedChange={(checked) => 
-                            handleInputChange("variableRateEnabled", checked)
-                          }
-                        />
-                        <span className="text-sm">
-                          {inputs.variableRateEnabled ? "Enabled" : "Disabled"}
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Variable Rate */}
-                    {inputs.variableRateEnabled && (
-                      <div className="space-y-2">
-                        <Label htmlFor="variableRate">Variable Rate (%)</Label>
-                        <Input
-                          id="variableRate"
-                          type="number"
-                          step="0.01"
-                          value={inputs.variableRate}
-                          onChange={(e) => handleInputChange("variableRate", parseFloat(e.target.value) || 0)}
-                          placeholder="8.0"
-                        />
-                      </div>
-                    )}
-                  </div>
-                </CardContent>
-              )}
             </Card>
 
             {/* Key Metrics */}
@@ -1009,6 +932,191 @@ export default function MortgagePage() {
           type="mortgage"
           loading={calculationsLoading}
         />
+
+        {/* Edit Parameters Dialog */}
+        <Dialog open={showEditDialog} onOpenChange={setShowEditDialog}>
+          <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Edit Mortgage Parameters</DialogTitle>
+              <DialogDescription>
+                Modify your mortgage details or select from your saved mortgage profiles
+              </DialogDescription>
+            </DialogHeader>
+            
+            <div className="space-y-6">
+              {/* Mortgage Selection */}
+              {userMortgageProfiles.length > 0 && (
+                <div className="space-y-2">
+                  <Label>Select from Saved Mortgages</Label>
+                  <Select value={selectedMortgageId} onValueChange={handleSelectMortgage}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Choose a saved mortgage profile..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {userMortgageProfiles.map((profile) => (
+                        <SelectItem key={profile.id} value={profile.id}>
+                          {profile.name} - ${profile.property_value.toLocaleString()} • {profile.interest_rate}% • {profile.term_years} years
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+
+              {/* Form Fields */}
+              {tempInputs && (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {/* Property Value */}
+                  <div className="space-y-2">
+                    <Label htmlFor="dialog-propertyValue">Property Value</Label>
+                    <Input
+                      id="dialog-propertyValue"
+                      type="number"
+                      value={tempInputs.propertyValue}
+                      onChange={(e) => handleTempInputChange("propertyValue", parseFloat(e.target.value) || 0)}
+                      placeholder="500000"
+                    />
+                  </div>
+
+                  {/* Mortgage Amount */}
+                  <div className="space-y-2">
+                    <Label htmlFor="dialog-mortgageAmount">Mortgage Amount</Label>
+                    <Input
+                      id="dialog-mortgageAmount"
+                      type="number"
+                      value={tempInputs.mortgageAmount}
+                      onChange={(e) => handleTempInputChange("mortgageAmount", parseFloat(e.target.value) || 0)}
+                      placeholder="400000"
+                    />
+                  </div>
+
+                  {/* Interest Rate */}
+                  <div className="space-y-2">
+                    <Label htmlFor="dialog-interestRate">Fixed Interest Rate (%)</Label>
+                    <Input
+                      id="dialog-interestRate"
+                      type="number"
+                      step="0.01"
+                      value={tempInputs.interestRate}
+                      onChange={(e) => handleTempInputChange("interestRate", parseFloat(e.target.value) || 0)}
+                      placeholder="6.5"
+                    />
+                  </div>
+
+                  {/* Term */}
+                  <div className="space-y-2">
+                    <Label htmlFor="dialog-termYears">Term (Years)</Label>
+                    <Select
+                      value={tempInputs.termYears.toString()}
+                      onValueChange={(value) => handleTempInputChange("termYears", parseInt(value))}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="15">15 years</SelectItem>
+                        <SelectItem value="20">20 years</SelectItem>
+                        <SelectItem value="25">25 years</SelectItem>
+                        <SelectItem value="30">30 years</SelectItem>
+                        <SelectItem value="35">35 years</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {/* Payment Type */}
+                  <div className="space-y-2">
+                    <Label>Payment Type</Label>
+                    <div className="flex items-center space-x-2">
+                      <Switch
+                        checked={tempInputs.paymentType === "repayment"}
+                        onCheckedChange={(checked) => 
+                          handleTempInputChange("paymentType", checked ? "repayment" : "interest-only")
+                        }
+                      />
+                      <span className="text-sm">
+                        {tempInputs.paymentType === "repayment" ? "Repayment" : "Interest Only"}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Extra Payment */}
+                  <div className="space-y-2">
+                    <Label htmlFor="dialog-extraPayment">Extra Monthly Payment</Label>
+                    <Input
+                      id="dialog-extraPayment"
+                      type="number"
+                      value={tempInputs.extraPayment}
+                      onChange={(e) => handleTempInputChange("extraPayment", parseFloat(e.target.value) || 0)}
+                      placeholder="0"
+                    />
+                  </div>
+
+                  {/* Mortgage Start Date */}
+                  <div className="space-y-2">
+                    <Label htmlFor="dialog-startDate">Mortgage Start Date</Label>
+                    <Input
+                      id="dialog-startDate"
+                      type="date"
+                      value={tempInputs.startDate}
+                      onChange={(e) => handleTempInputChange("startDate", e.target.value)}
+                    />
+                  </div>
+
+                  {/* Fixed Rate End Date */}
+                  <div className="space-y-2">
+                    <Label htmlFor="dialog-fixedRateEndDate">Fixed Rate End Date</Label>
+                    <Input
+                      id="dialog-fixedRateEndDate"
+                      type="date"
+                      value={tempInputs.fixedRateEndDate}
+                      onChange={(e) => handleTempInputChange("fixedRateEndDate", e.target.value)}
+                    />
+                  </div>
+
+                  {/* Variable Rate Toggle */}
+                  <div className="space-y-2">
+                    <Label>Variable Rate After Fixed Period</Label>
+                    <div className="flex items-center space-x-2">
+                      <Switch
+                        checked={tempInputs.variableRateEnabled}
+                        onCheckedChange={(checked) => 
+                          handleTempInputChange("variableRateEnabled", checked)
+                        }
+                      />
+                      <span className="text-sm">
+                        {tempInputs.variableRateEnabled ? "Enabled" : "Disabled"}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Variable Rate */}
+                  {tempInputs.variableRateEnabled && (
+                    <div className="space-y-2">
+                      <Label htmlFor="dialog-variableRate">Variable Rate (%)</Label>
+                      <Input
+                        id="dialog-variableRate"
+                        type="number"
+                        step="0.01"
+                        value={tempInputs.variableRate}
+                        onChange={(e) => handleTempInputChange("variableRate", parseFloat(e.target.value) || 0)}
+                        placeholder="8.0"
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <DialogFooter>
+              <Button variant="outline" onClick={handleCloseEditDialog}>
+                Cancel
+              </Button>
+              <Button onClick={handleApplyChanges}>
+                Apply Changes
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </div>
   );
