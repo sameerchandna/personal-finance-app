@@ -22,29 +22,8 @@ import {
   Settings,
   Save
 } from "lucide-react";
-import {
-  Chart as ChartJS,
-  CategoryScale,
-  LinearScale,
-  PointElement,
-  LineElement,
-  BarElement,
-  Title,
-  Tooltip,
-  Legend,
-} from 'chart.js';
-import { Bar, Line } from 'react-chartjs-2';
-
-ChartJS.register(
-  CategoryScale,
-  LinearScale,
-  PointElement,
-  LineElement,
-  BarElement,
-  Title,
-  Tooltip,
-  Legend
-);
+import { Bar, BarChart, Line, LineChart, XAxis, YAxis, CartesianGrid } from "recharts";
+import { ChartContainer, ChartTooltip, ChartTooltipContent, ChartLegend, ChartLegendContent } from "@/components/ui/chart";
 
 interface InvestmentInputs {
   initialAmount: number;
@@ -382,108 +361,61 @@ export default function InvestmentCalculator() {
   }, [displayInputs, rateSettings]);
 
   // Chart data for growth over time (4-Component Stacked Bar Chart)
-  const growthChartData = {
-    labels: calculateInvestment.yearlyBreakdown.map(item => `Year ${item.year}`),
-    datasets: [
-      {
-        label: 'Original Amount',
-        data: calculateInvestment.yearlyBreakdown.map(item => item.originalAmount - item.originalInterest),
-        backgroundColor: 'rgba(34, 197, 94, 0.8)',
-        borderColor: 'rgb(34, 197, 94)',
-        borderWidth: 1,
-      },
-      {
-        label: 'Interest on Original',
-        data: calculateInvestment.yearlyBreakdown.map(item => item.originalInterest),
-        backgroundColor: 'rgba(16, 185, 129, 0.8)',
-        borderColor: 'rgb(16, 185, 129)',
-        borderWidth: 1,
-      },
-      {
-        label: 'Regular Contributions',
-        data: calculateInvestment.yearlyBreakdown.map(item => item.regularContributions),
-        backgroundColor: 'rgba(59, 130, 246, 0.8)',
-        borderColor: 'rgb(59, 130, 246)',
-        borderWidth: 1,
-      },
-      {
-        label: 'Interest on Regular',
-        data: calculateInvestment.yearlyBreakdown.map(item => item.regularInterest),
-        backgroundColor: 'rgba(99, 102, 241, 0.8)',
-        borderColor: 'rgb(99, 102, 241)',
-        borderWidth: 1,
-      }
-    ]
-  };
+  const growthChartData = calculateInvestment.yearlyBreakdown.map(item => ({
+    year: `Year ${item.year}`,
+    originalAmount: item.originalAmount - item.originalInterest,
+    originalInterest: item.originalInterest,
+    regularContributions: item.regularContributions,
+    regularInterest: item.regularInterest,
+  }));
   
-  console.log('Chart data:', growthChartData);
-  console.log('Regular contributions data:', growthChartData.datasets[2].data);
-  console.log('Interest on regular data:', growthChartData.datasets[3].data);
-
   // Rate comparison chart data
-  const rateComparisonChartData = {
-    labels: calculateRateComparison[0]?.data.map(item => `Year ${item.year}`) || [],
-    datasets: calculateRateComparison.map((scenario, index) => ({
-      label: `${scenario.name.charAt(0).toUpperCase() + scenario.name.slice(1)} (${scenario.rate}%)`,
-      data: scenario.data.map(item => item.value),
-      borderColor: index === 0 ? 'rgb(34, 197, 94)' : index === 1 ? 'rgb(59, 130, 246)' : 'rgb(239, 68, 68)',
-      backgroundColor: index === 0 ? 'rgba(34, 197, 94, 0.1)' : index === 1 ? 'rgba(59, 130, 246, 0.1)' : 'rgba(239, 68, 68, 0.1)',
-      tension: 0.1,
-      fill: false,
-    }))
+  const rateComparisonChartData = useMemo(() => {
+    if (!calculateRateComparison[0]?.data) return [];
+    
+    const years = calculateRateComparison[0].data.map(item => `Year ${item.year}`);
+    
+    return years.map((year, yearIndex) => {
+      const dataPoint: any = { year };
+      calculateRateComparison.forEach((scenario, scenarioIndex) => {
+        const scenarioName = `${scenario.name.charAt(0).toUpperCase() + scenario.name.slice(1)} (${scenario.rate}%)`;
+        dataPoint[scenarioName] = scenario.data[yearIndex]?.value || 0;
+      });
+      return dataPoint;
+    });
+  }, [calculateRateComparison]);
+
+  // Chart configuration for shadcn charts - consistent color mapping
+  const growthChartConfig = {
+    originalAmount: {
+      label: "Original Amount",
+      color: "var(--chart-1)",
+    },
+    originalInterest: {
+      label: "Interest on Original",
+      color: "var(--chart-2)",
+    },
+    regularContributions: {
+      label: "Regular Contributions",
+      color: "var(--chart-3)",
+    },
+    regularInterest: {
+      label: "Interest on Regular",
+      color: "var(--chart-4)",
+    },
   };
 
-  const chartOptions = {
-    responsive: true,
-    maintainAspectRatio: false,
-    plugins: {
-      legend: {
-        position: 'top' as const,
-      },
-      title: {
-        display: true,
-        text: 'Investment Breakdown: Original vs Regular Contributions & Their Interest'
-      },
-    },
-    scales: {
-      x: {
-        stacked: true,
-      },
-      y: {
-        stacked: true,
-        beginAtZero: true,
-        ticks: {
-          callback: function(value: any) {
-            return formatCurrency(value);
-          }
-        }
-      }
-    }
-  };
-
-  const rateComparisonChartOptions = {
-    responsive: true,
-    maintainAspectRatio: false,
-    plugins: {
-      legend: {
-        position: 'top' as const,
-      },
-      title: {
-        display: true,
-        text: 'Investment Growth Comparison by Return Rate'
-      },
-    },
-    scales: {
-      y: {
-        beginAtZero: true,
-        ticks: {
-          callback: function(value: any) {
-            return formatCurrency(value);
-          }
-        }
-      }
-    }
-  };
+  const rateComparisonChartConfig = useMemo(() => {
+    const config: any = {};
+    calculateRateComparison.forEach((scenario, index) => {
+      const scenarioName = `${scenario.name.charAt(0).toUpperCase() + scenario.name.slice(1)} (${scenario.rate}%)`;
+      config[scenarioName] = {
+        label: scenarioName,
+        color: `var(--chart-${index + 1})`,
+      };
+    });
+    return config;
+  }, [calculateRateComparison]);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-green-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">
@@ -737,9 +669,53 @@ export default function InvestmentCalculator() {
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="h-96">
-                  <Bar data={growthChartData} options={chartOptions} />
-                </div>
+                <ChartContainer config={growthChartConfig} className="h-96">
+                  <BarChart accessibilityLayer data={growthChartData}>
+                    <CartesianGrid vertical={false} />
+                    <XAxis
+                      dataKey="year"
+                      tickLine={false}
+                      tickMargin={10}
+                      axisLine={false}
+                      tick={{ fontSize: 12 }}
+                      angle={-45}
+                      textAnchor="end"
+                      height={80}
+                    />
+                    <YAxis 
+                      tick={{ fontSize: 12 }}
+                      tickFormatter={(value) => formatCurrency(value)}
+                      tickLine={false}
+                      axisLine={false}
+                    />
+                    <ChartTooltip content={<ChartTooltipContent hideLabel />} />
+                    <ChartLegend content={<ChartLegendContent />} />
+                    <Bar
+                      dataKey="originalAmount"
+                      stackId="a"
+                      fill="var(--color-originalAmount)"
+                      radius={[0, 0, 0, 0]}
+                    />
+                    <Bar
+                      dataKey="originalInterest"
+                      stackId="a"
+                      fill="var(--color-originalInterest)"
+                      radius={[0, 0, 0, 0]}
+                    />
+                    <Bar
+                      dataKey="regularContributions"
+                      stackId="a"
+                      fill="var(--color-regularContributions)"
+                      radius={[0, 0, 0, 0]}
+                    />
+                    <Bar
+                      dataKey="regularInterest"
+                      stackId="a"
+                      fill="var(--color-regularInterest)"
+                      radius={[4, 4, 0, 0]}
+                    />
+                  </BarChart>
+                </ChartContainer>
               </CardContent>
             </Card>
 
@@ -764,9 +740,49 @@ export default function InvestmentCalculator() {
                 </div>
               </CardHeader>
               <CardContent>
-                <div className="h-96">
-                  <Line data={rateComparisonChartData} options={rateComparisonChartOptions} />
-                </div>
+                <ChartContainer config={rateComparisonChartConfig} className="h-96">
+                  <LineChart
+                    accessibilityLayer
+                    data={rateComparisonChartData}
+                    margin={{
+                      left: 12,
+                      right: 12,
+                    }}
+                  >
+                    <CartesianGrid vertical={false} />
+                    <XAxis
+                      dataKey="year"
+                      tickLine={false}
+                      axisLine={false}
+                      tickMargin={8}
+                      tick={{ fontSize: 12 }}
+                      angle={-45}
+                      textAnchor="end"
+                      height={80}
+                    />
+                    <YAxis 
+                      tick={{ fontSize: 12 }}
+                      tickFormatter={(value) => formatCurrency(value)}
+                      tickLine={false}
+                      axisLine={false}
+                    />
+                    <ChartTooltip cursor={false} content={<ChartTooltipContent />} />
+                    <ChartLegend content={<ChartLegendContent />} />
+                    {calculateRateComparison.map((scenario, index) => {
+                      const scenarioName = `${scenario.name.charAt(0).toUpperCase() + scenario.name.slice(1)} (${scenario.rate}%)`;
+                      return (
+                        <Line
+                          key={scenarioName}
+                          dataKey={scenarioName}
+                          type="monotone"
+                          stroke={`var(--chart-${index + 1})`}
+                          strokeWidth={2}
+                          dot={false}
+                        />
+                      );
+                    })}
+                  </LineChart>
+                </ChartContainer>
               </CardContent>
             </Card>
           </div>

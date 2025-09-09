@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { ColorVariantDropdown } from "@/components/color-variant-dropdown";
 import { UserButton, useUser } from '@clerk/nextjs';
 
 export function Navbar() {
@@ -29,6 +30,7 @@ export function Navbar() {
           {/* CTA Buttons */}
           <div className="flex items-center space-x-4">
             <ThemeToggle />
+            <ColorVariantDropdown />
             {isLoaded && (
               <>
                 {isSignedIn ? (

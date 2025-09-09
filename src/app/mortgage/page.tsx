@@ -14,31 +14,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Calculator, TrendingUp, PieChart, Calendar, DollarSign, Clock, ChevronDown, ChevronUp, Save } from "lucide-react";
-import {
-  Chart as ChartJS,
-  CategoryScale,
-  LinearScale,
-  PointElement,
-  LineElement,
-  Title,
-  Tooltip,
-  Legend,
-  ArcElement,
-} from 'chart.js';
-import { Doughnut } from 'react-chartjs-2';
+import { Calculator, TrendingUp, Calendar, DollarSign, Clock, ChevronDown, ChevronUp, Save } from "lucide-react";
+import { PieChart, Pie, Cell } from "recharts";
+import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
 import AmortizationChart from '@/components/amortization-chart';
-
-ChartJS.register(
-  CategoryScale,
-  LinearScale,
-  PointElement,
-  LineElement,
-  Title,
-  Tooltip,
-  Legend,
-  ArcElement
-);
 
 interface MortgageInputs {
   propertyValue: number;
@@ -442,30 +421,33 @@ export default function MortgagePage() {
   const paymentBreakdownData = useMemo(() => {
     if (calculationInputs.paymentType === "interest-only") {
       const firstPayment = amortizationSchedule[0];
-      if (!firstPayment) return { labels: [], datasets: [] };
+      if (!firstPayment) return [];
       
-      return {
-        labels: ['Interest'],
-        datasets: [{
-          data: [firstPayment.payment],
-          backgroundColor: ['#ef4444'],
-          borderWidth: 0,
-        }]
-      };
+      return [
+        { name: 'Interest', value: firstPayment.payment, fill: 'var(--chart-1)' }
+      ];
     }
 
     const firstPayment = amortizationSchedule[0];
-    if (!firstPayment) return { labels: [], datasets: [] };
+    if (!firstPayment) return [];
 
-    return {
-      labels: ['Principal', 'Interest'],
-      datasets: [{
-        data: [firstPayment.principal, firstPayment.interest],
-        backgroundColor: ['#10b981', '#ef4444'],
-        borderWidth: 0,
-      }]
-    };
+    return [
+      { name: 'Principal', value: firstPayment.principal, fill: 'var(--chart-1)' },
+      { name: 'Interest', value: firstPayment.interest, fill: 'var(--chart-2)' }
+    ];
   }, [calculationInputs.paymentType, amortizationSchedule]);
+
+  // Chart configuration for shadcn charts
+  const paymentChartConfig = {
+    Principal: {
+      label: "Principal",
+      color: "var(--chart-1)",
+    },
+    Interest: {
+      label: "Interest", 
+      color: "var(--chart-2)",
+    },
+  };
 
 
   // Comparison scenarios
@@ -695,27 +677,32 @@ export default function MortgagePage() {
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
-                  <div className="h-64">
-                    <Doughnut 
-                      data={paymentBreakdownData}
-                      options={{
-                        responsive: true,
-                        maintainAspectRatio: false,
-                        plugins: {
-                          legend: {
-                            position: 'bottom',
-                          },
-                          tooltip: {
-                            callbacks: {
-                              label: function(context) {
-                                return `${context.label}: $${context.parsed.toLocaleString()}`;
-                              }
-                            }
-                          }
-                        }
-                      }}
-                    />
-                  </div>
+                  <ChartContainer config={paymentChartConfig} className="h-64">
+                    <PieChart>
+                      <Pie
+                        data={paymentBreakdownData}
+                        dataKey="value"
+                        nameKey="name"
+                        cx="50%"
+                        cy="50%"
+                        outerRadius={80}
+                        innerRadius={40}
+                        strokeWidth={0}
+                      >
+                        {paymentBreakdownData.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={entry.fill} />
+                        ))}
+                      </Pie>
+                      <ChartTooltip 
+                        content={<ChartTooltipContent 
+                          formatter={(value, name) => [
+                            `$${Number(value).toLocaleString()}`,
+                            paymentChartConfig[name as keyof typeof paymentChartConfig]?.label || name
+                          ]}
+                        />}
+                      />
+                    </PieChart>
+                  </ChartContainer>
                 </CardContent>
               </Card>
 

@@ -2,64 +2,87 @@
 
 import { createContext, useContext, useEffect, useState } from "react";
 
-type Theme = "dark" | "light" | "system";
+type Theme = "dark" | "light";
+type ThemeVariant = "default" | "blue" | "slate";
 
 type ThemeProviderProps = {
   children: React.ReactNode;
   defaultTheme?: Theme;
+  defaultVariant?: ThemeVariant;
   storageKey?: string;
 };
 
 type ThemeProviderState = {
   theme: Theme;
+  variant: ThemeVariant;
   setTheme: (theme: Theme) => void;
+  setVariant: (variant: ThemeVariant) => void;
 };
 
 const initialState: ThemeProviderState = {
-  theme: "system",
+  theme: "light",
+  variant: "default",
   setTheme: () => null,
+  setVariant: () => null,
 };
 
 const ThemeProviderContext = createContext<ThemeProviderState>(initialState);
 
 export function ThemeProvider({
   children,
-  defaultTheme = "system",
+  defaultTheme = "light",
+  defaultVariant = "default",
   storageKey = "nextapp-ui-theme",
   ...props
 }: ThemeProviderProps) {
   const [theme, setTheme] = useState<Theme>(defaultTheme);
+  const [variant, setVariant] = useState<ThemeVariant>(defaultVariant);
+  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    const storedTheme = localStorage.getItem(storageKey) as Theme;
+    setMounted(true);
+    const storedTheme = localStorage.getItem(`${storageKey}-mode`) as Theme;
+    const storedVariant = localStorage.getItem(`${storageKey}-variant`) as ThemeVariant;
+    
     if (storedTheme) {
       setTheme(storedTheme);
+    }
+    if (storedVariant) {
+      setVariant(storedVariant);
     }
   }, [storageKey]);
 
   useEffect(() => {
+    if (!mounted) return;
+    
     const root = window.document.documentElement;
 
-    root.classList.remove("light", "dark");
+    // Remove all theme classes
+    root.classList.remove("light", "dark", "blue", "slate");
 
-    if (theme === "system") {
-      const systemTheme = window.matchMedia("(prefers-color-scheme: dark)")
-        .matches
-        ? "dark"
-        : "light";
-
-      root.classList.add(systemTheme);
-      return;
+    // Add variant class
+    if (variant !== "default") {
+      root.classList.add(variant);
     }
 
+    // Add theme class
     root.classList.add(theme);
-  }, [theme]);
+  }, [theme, variant, mounted]);
 
   const value = {
     theme,
+    variant,
     setTheme: (theme: Theme) => {
-      localStorage.setItem(storageKey, theme);
-      setTheme(theme);
+      if (mounted) {
+        localStorage.setItem(`${storageKey}-mode`, theme);
+        setTheme(theme);
+      }
+    },
+    setVariant: (variant: ThemeVariant) => {
+      if (mounted) {
+        localStorage.setItem(`${storageKey}-variant`, variant);
+        setVariant(variant);
+      }
     },
   };
 

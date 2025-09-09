@@ -2,26 +2,8 @@
 
 import { useMemo } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  Chart as ChartJS,
-  CategoryScale,
-  LinearScale,
-  BarElement,
-  Title,
-  Tooltip,
-  Legend,
-} from 'chart.js';
-import { Bar } from 'react-chartjs-2';
-
-// Register Chart.js components
-ChartJS.register(
-  CategoryScale,
-  LinearScale,
-  BarElement,
-  Title,
-  Tooltip,
-  Legend
-);
+import { Bar, BarChart, XAxis, YAxis, CartesianGrid } from "recharts";
+import { ChartContainer, ChartTooltip, ChartTooltipContent, ChartLegend, ChartLegendContent } from "@/components/ui/chart";
 
 interface AmortizationEntry {
   month: number;
@@ -54,31 +36,14 @@ export default function AmortizationChart({ amortizationSchedule, mortgageAmount
       return {
         year: yearIndex + 1,
         actualYear,
+        label: `${actualYear} (Y${yearIndex + 1})`,
         principal: yearSchedule.reduce((sum, entry) => sum + entry.principal, 0),
         interest: yearSchedule.reduce((sum, entry) => sum + entry.interest, 0),
         balance: yearSchedule[yearSchedule.length - 1]?.balance || 0,
       };
     });
 
-    return {
-      labels: yearlyData.map(d => `${d.actualYear} (Y${d.year})`),
-      datasets: [
-        {
-          label: 'Principal Paid',
-          data: yearlyData.map(d => d.principal),
-          backgroundColor: 'rgba(34, 197, 94, 0.8)',
-          borderColor: 'rgb(34, 197, 94)',
-          borderWidth: 1,
-        },
-        {
-          label: 'Interest Paid',
-          data: yearlyData.map(d => d.interest),
-          backgroundColor: 'rgba(239, 68, 68, 0.8)',
-          borderColor: 'rgb(239, 68, 68)',
-          borderWidth: 1,
-        },
-      ]
-    };
+    return yearlyData;
   }, [amortizationSchedule]);
 
   // Remaining balance chart data (what's left to pay)
@@ -120,32 +85,35 @@ export default function AmortizationChart({ amortizationSchedule, mortgageAmount
       return {
         year: yearData.year,
         actualYear: yearData.actualYear,
+        label: `${yearData.actualYear} (Y${yearData.year})`,
         remainingPrincipal: Math.max(0, currentRemainingPrincipal),
         remainingInterest: Math.max(0, currentRemainingInterest),
         totalRemaining: Math.max(0, currentRemainingPrincipal + currentRemainingInterest),
       };
     });
 
-    return {
-      labels: remainingData.map(d => `${d.actualYear} (Y${d.year})`),
-      datasets: [
-        {
-          label: 'Remaining Principal to Pay',
-          data: remainingData.map(d => d.remainingPrincipal),
-          backgroundColor: 'rgba(34, 197, 94, 0.8)', // Green for remaining principal
-          borderColor: 'rgb(34, 197, 94)',
-          borderWidth: 1,
-        },
-        {
-          label: 'Remaining Interest to Pay',
-          data: remainingData.map(d => d.remainingInterest),
-          backgroundColor: 'rgba(239, 68, 68, 0.8)', // Red for remaining interest
-          borderColor: 'rgb(239, 68, 68)',
-          borderWidth: 1,
-        },
-      ]
-    };
+    return remainingData;
   }, [amortizationSchedule, mortgageAmount]);
+
+  // Chart configuration for shadcn charts - consistent color mapping
+  const chartConfig = {
+    principal: {
+      label: "Principal Paid",
+      color: "var(--chart-1)",
+    },
+    interest: {
+      label: "Interest Paid", 
+      color: "var(--chart-2)",
+    },
+    remainingPrincipal: {
+      label: "Remaining Principal to Pay",
+      color: "var(--chart-1)",
+    },
+    remainingInterest: {
+      label: "Remaining Interest to Pay",
+      color: "var(--chart-2)",
+    },
+  };
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -158,58 +126,41 @@ export default function AmortizationChart({ amortizationSchedule, mortgageAmount
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="h-80">
-            <Bar 
-              data={amortizationChartData}
-              options={{
-                responsive: true,
-                maintainAspectRatio: false,
-                interaction: {
-                  mode: 'index',
-                  intersect: false,
-                },
-                scales: {
-                  x: {
-                    stacked: true,
-                    display: true,
-                    title: {
-                      display: true,
-                      text: 'Year'
-                    }
-                  },
-                  y: {
-                    stacked: true,
-                    display: true,
-                    title: {
-                      display: true,
-                      text: 'Amount ($)'
-                    },
-                    ticks: {
-                      callback: function(value) {
-                        return '$' + value.toLocaleString();
-                      }
-                    }
-                  }
-                },
-                plugins: {
-                  legend: {
-                    position: 'top',
-                  },
-                  tooltip: {
-                    callbacks: {
-                      label: function(context) {
-                        return `${context.dataset.label}: $${context.parsed.y.toLocaleString()}`;
-                      },
-                      footer: function(tooltipItems) {
-                        const total = tooltipItems.reduce((sum, item) => sum + item.parsed.y, 0);
-                        return `Total: $${total.toLocaleString()}`;
-                      }
-                    }
-                  }
-                }
-              }}
-            />
-          </div>
+          <ChartContainer config={chartConfig} className="h-80">
+            <BarChart accessibilityLayer data={amortizationChartData}>
+              <CartesianGrid vertical={false} />
+              <XAxis
+                dataKey="label"
+                tickLine={false}
+                tickMargin={10}
+                axisLine={false}
+                tick={{ fontSize: 12 }}
+                angle={-45}
+                textAnchor="end"
+                height={80}
+              />
+              <YAxis 
+                tick={{ fontSize: 12 }}
+                tickFormatter={(value) => `$${value.toLocaleString()}`}
+                tickLine={false}
+                axisLine={false}
+              />
+              <ChartTooltip content={<ChartTooltipContent hideLabel />} />
+              <ChartLegend content={<ChartLegendContent />} />
+              <Bar
+                dataKey="principal"
+                stackId="a"
+                fill="var(--color-principal)"
+                radius={[0, 0, 4, 4]}
+              />
+              <Bar
+                dataKey="interest"
+                stackId="a"
+                fill="var(--color-interest)"
+                radius={[4, 4, 0, 0]}
+              />
+            </BarChart>
+          </ChartContainer>
         </CardContent>
       </Card>
 
@@ -222,58 +173,41 @@ export default function AmortizationChart({ amortizationSchedule, mortgageAmount
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="h-80">
-            <Bar 
-              data={remainingBalanceChartData}
-              options={{
-                responsive: true,
-                maintainAspectRatio: false,
-                interaction: {
-                  mode: 'index',
-                  intersect: false,
-                },
-                scales: {
-                  x: {
-                    stacked: true,
-                    display: true,
-                    title: {
-                      display: true,
-                      text: 'Year'
-                    }
-                  },
-                  y: {
-                    stacked: true,
-                    display: true,
-                    title: {
-                      display: true,
-                      text: 'Remaining Amount ($)'
-                    },
-                    ticks: {
-                      callback: function(value) {
-                        return '$' + value.toLocaleString();
-                      }
-                    }
-                  }
-                },
-                plugins: {
-                  legend: {
-                    position: 'top',
-                  },
-                  tooltip: {
-                    callbacks: {
-                      label: function(context) {
-                        return `${context.dataset.label}: $${context.parsed.y.toLocaleString()}`;
-                      },
-                      footer: function(tooltipItems) {
-                        const total = tooltipItems.reduce((sum, item) => sum + item.parsed.y, 0);
-                        return `Total Remaining: $${total.toLocaleString()}`;
-                      }
-                    }
-                  }
-                }
-              }}
-            />
-          </div>
+          <ChartContainer config={chartConfig} className="h-80">
+            <BarChart accessibilityLayer data={remainingBalanceChartData}>
+              <CartesianGrid vertical={false} />
+              <XAxis
+                dataKey="label"
+                tickLine={false}
+                tickMargin={10}
+                axisLine={false}
+                tick={{ fontSize: 12 }}
+                angle={-45}
+                textAnchor="end"
+                height={80}
+              />
+              <YAxis 
+                tick={{ fontSize: 12 }}
+                tickFormatter={(value) => `$${value.toLocaleString()}`}
+                tickLine={false}
+                axisLine={false}
+              />
+              <ChartTooltip content={<ChartTooltipContent hideLabel />} />
+              <ChartLegend content={<ChartLegendContent />} />
+              <Bar
+                dataKey="remainingPrincipal"
+                stackId="b"
+                fill="var(--color-remainingPrincipal)"
+                radius={[0, 0, 4, 4]}
+              />
+              <Bar
+                dataKey="remainingInterest"
+                stackId="b"
+                fill="var(--color-remainingInterest)"
+                radius={[4, 4, 0, 0]}
+              />
+            </BarChart>
+          </ChartContainer>
         </CardContent>
       </Card>
     </div>
