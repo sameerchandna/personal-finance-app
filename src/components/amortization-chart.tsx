@@ -116,7 +116,7 @@ export default function AmortizationChart({ amortizationSchedule, mortgageAmount
   };
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 w-full">
       {/* Amortization Schedule Chart */}
       <Card>
         <CardHeader>
@@ -125,25 +125,36 @@ export default function AmortizationChart({ amortizationSchedule, mortgageAmount
             Yearly breakdown of principal and interest payments over the loan term
           </CardDescription>
         </CardHeader>
-        <CardContent>
-          <ChartContainer config={chartConfig} className="h-80">
-            <BarChart accessibilityLayer data={amortizationChartData}>
+        <CardContent className="p-2">
+          <ChartContainer config={chartConfig} className="h-80 w-full">
+            <BarChart 
+              accessibilityLayer 
+              data={amortizationChartData} 
+              margin={{
+                left: 4,
+                right: 4,
+                top: 4,
+                bottom: 40,
+              }}
+            >
               <CartesianGrid vertical={false} />
               <XAxis
                 dataKey="label"
                 tickLine={false}
-                tickMargin={10}
+                tickMargin={6}
                 axisLine={false}
-                tick={{ fontSize: 12 }}
+                tick={{ fontSize: 8 }}
                 angle={-45}
                 textAnchor="end"
-                height={80}
+                height={40}
+                interval={0}
               />
               <YAxis 
-                tick={{ fontSize: 12 }}
+                tick={{ fontSize: 8 }}
                 tickFormatter={(value) => `$${value.toLocaleString()}`}
                 tickLine={false}
                 axisLine={false}
+                width={50}
               />
               <ChartTooltip content={<ChartTooltipContent hideLabel />} />
               <ChartLegend content={<ChartLegendContent />} />
@@ -172,25 +183,36 @@ export default function AmortizationChart({ amortizationSchedule, mortgageAmount
             Amount of principal and interest remaining to be paid throughout the loan term
           </CardDescription>
         </CardHeader>
-        <CardContent>
-          <ChartContainer config={chartConfig} className="h-80">
-            <BarChart accessibilityLayer data={remainingBalanceChartData}>
+        <CardContent className="p-2">
+          <ChartContainer config={chartConfig} className="h-80 w-full">
+            <BarChart 
+              accessibilityLayer 
+              data={remainingBalanceChartData} 
+              margin={{
+                left: 4,
+                right: 4,
+                top: 4,
+                bottom: 40,
+              }}
+            >
               <CartesianGrid vertical={false} />
               <XAxis
                 dataKey="label"
                 tickLine={false}
-                tickMargin={10}
+                tickMargin={6}
                 axisLine={false}
-                tick={{ fontSize: 12 }}
+                tick={{ fontSize: 8 }}
                 angle={-45}
                 textAnchor="end"
-                height={80}
+                height={40}
+                interval={0}
               />
               <YAxis 
-                tick={{ fontSize: 12 }}
+                tick={{ fontSize: 8 }}
                 tickFormatter={(value) => `$${value.toLocaleString()}`}
                 tickLine={false}
                 axisLine={false}
+                width={50}
               />
               <ChartTooltip content={<ChartTooltipContent hideLabel />} />
               <ChartLegend content={<ChartLegendContent />} />

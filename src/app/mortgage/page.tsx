@@ -13,11 +13,12 @@ import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Calculator, TrendingUp, Calendar, DollarSign, Clock, ChevronDown, ChevronUp, Save } from "lucide-react";
-import { PieChart, Pie, Cell } from "recharts";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Calculator, TrendingUp, Calendar, DollarSign, Clock, ChevronDown, Save } from "lucide-react";
+import { PieChart, PolarRadiusAxis, RadialBar, RadialBarChart, Label as RechartsLabel } from "recharts";
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
 import AmortizationChart from '@/components/amortization-chart';
+import AdditionalPaymentChart from '@/components/additional-payment-chart';
 
 interface MortgageInputs {
   propertyValue: number;
@@ -60,101 +61,15 @@ export default function MortgagePage() {
     loading: calculationsLoading 
   } = useSavedCalculations(user);
 
-  // Show loading state while checking authentication
-  if (!isLoaded) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-gray-600 dark:text-gray-300">Loading...</p>
-        </div>
-      </div>
-    );
-  }
-
-  // Show sign-in page if not authenticated
-  if (!isSignedIn) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-white to-green-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">
-        <div className="w-full max-w-md">
-          <div className="text-center mb-8">
-            <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">
-              Mortgage Calculator
-            </h1>
-            <p className="text-gray-600 dark:text-gray-300">
-              Please sign in to access your personal mortgage calculator
-            </p>
-          </div>
-          <SignIn 
-            appearance={{
-              elements: {
-                formButtonPrimary: 'bg-blue-600 hover:bg-blue-700 text-sm normal-case',
-                card: 'shadow-lg border-0',
-              }
-            }}
-          />
-        </div>
-      </div>
-    );
-  }
-  
   const [showSaveLoadDialog, setShowSaveLoadDialog] = useState(false);
   const [userMortgageProfiles, setUserMortgageProfiles] = useState<any[]>([]);
-  const [loadingProfiles, setLoadingProfiles] = useState(false);
   const [showEditDialog, setShowEditDialog] = useState(false);
   const [selectedMortgageId, setSelectedMortgageId] = useState<string>("");
   const [tempInputs, setTempInputs] = useState<MortgageInputs | null>(null);
   const [currentProfileName, setCurrentProfileName] = useState<string>("Default Calculator");
   const [isDefaultProfile, setIsDefaultProfile] = useState<boolean>(true);
   const [profileLastUpdated, setProfileLastUpdated] = useState<string>("");
-
-  // Load user's mortgage profiles on component mount
-  useEffect(() => {
-    const loadUserMortgageProfiles = async () => {
-      if (!user?.id) return;
-      
-      try {
-        setLoadingProfiles(true);
-        const profiles = await financialProfileService.getMortgageProfiles(user.id);
-        setUserMortgageProfiles(profiles);
-        
-        // If user has mortgage profiles, load the first one as default
-        if (profiles.length > 0) {
-          const firstProfile = profiles[0];
-          const loadedInputs = {
-            propertyValue: firstProfile.property_value,
-            mortgageAmount: firstProfile.mortgage_amount,
-            interestRate: firstProfile.interest_rate,
-            termYears: firstProfile.term_years,
-            paymentType: firstProfile.payment_type as "repayment" | "interest-only",
-            extraPayment: firstProfile.extra_payment,
-            startDate: firstProfile.start_date,
-            fixedRateEndDate: firstProfile.fixed_rate_end_date || getFixedRateEndDate(),
-            variableRate: firstProfile.variable_rate || 8.0,
-            variableRateEnabled: firstProfile.variable_rate_enabled,
-          };
-          
-          setInputs(loadedInputs);
-          setCalculationInputs(loadedInputs);
-          setCurrentProfileName(firstProfile.name);
-          setIsDefaultProfile(false);
-          setProfileLastUpdated(firstProfile.updated_at || firstProfile.created_at);
-        } else {
-          setCurrentProfileName("Default Calculator");
-          setIsDefaultProfile(true);
-          setProfileLastUpdated("");
-        }
-      } catch (err) {
-        console.error('Error loading mortgage profiles:', err);
-      } finally {
-        setLoadingProfiles(false);
-      }
-    };
-
-    if (user) {
-      loadUserMortgageProfiles();
-    }
-  }, [user]);
+  const [userPersonalInfo, setUserPersonalInfo] = useState<any>(null);
 
   // Helper function to get today's date in YYYY-MM-DD format
   const getTodayString = () => {
@@ -196,14 +111,162 @@ export default function MortgagePage() {
     variableRateEnabled: false,
   });
 
-  const [isUpdating, setIsUpdating] = useState(false);
-
-  const handleInputChange = (field: keyof MortgageInputs, value: string | number | boolean) => {
-    setInputs(prev => ({
-      ...prev,
-      [field]: value
-    }));
+  // Helper function to calculate months between two dates
+  const getMonthsBetween = (startDate: string, endDate: string): number => {
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    const yearDiff = end.getFullYear() - start.getFullYear();
+    const monthDiff = end.getMonth() - start.getMonth();
+    return yearDiff * 12 + monthDiff;
   };
+
+  // Helper function to add months to a date
+  const addMonthsToDate = (date: string, months: number): string => {
+    const d = new Date(date);
+    d.setMonth(d.getMonth() + months);
+    return d.toISOString().split('T')[0];
+  };
+
+  // Calculate fixed rate period
+  const fixedRateMonths = useMemo(() => 
+    calculationInputs.variableRateEnabled 
+      ? getMonthsBetween(calculationInputs.startDate, calculationInputs.fixedRateEndDate)
+      : calculationInputs.termYears * 12,
+    [calculationInputs.variableRateEnabled, calculationInputs.startDate, calculationInputs.fixedRateEndDate, calculationInputs.termYears]
+  );
+
+  // Calculate variable rate period
+  const variableRateMonths = useMemo(() => 
+    calculationInputs.variableRateEnabled 
+      ? (calculationInputs.termYears * 12) - fixedRateMonths
+      : 0,
+    [calculationInputs.variableRateEnabled, calculationInputs.termYears, fixedRateMonths]
+  );
+
+  // Calculate rates
+  const fixedMonthlyRate = useMemo(() => 
+    calculationInputs.interestRate / 100 / 12,
+    [calculationInputs.interestRate]
+  );
+  
+  const variableMonthlyRate = useMemo(() => 
+    calculationInputs.variableRateEnabled 
+      ? calculationInputs.variableRate / 100 / 12 
+      : fixedMonthlyRate,
+    [calculationInputs.variableRateEnabled, calculationInputs.variableRate, fixedMonthlyRate]
+  );
+
+  const totalPayments = useMemo(() => 
+    calculationInputs.termYears * 12,
+    [calculationInputs.termYears]
+  );
+
+  // For display purposes, calculate initial monthly payment using fixed rate
+  const initialMonthlyPayment = useMemo(() => 
+    calculationInputs.paymentType === "repayment" 
+      ? calculationInputs.mortgageAmount * (fixedMonthlyRate * Math.pow(1 + fixedMonthlyRate, totalPayments)) / (Math.pow(1 + fixedMonthlyRate, totalPayments) - 1)
+      : calculationInputs.mortgageAmount * fixedMonthlyRate,
+    [calculationInputs.paymentType, calculationInputs.mortgageAmount, fixedMonthlyRate, totalPayments]
+  );
+
+  // Calculate total interest and amount will be done in the amortization schedule
+  const ltv = useMemo(() => 
+    (calculationInputs.mortgageAmount / calculationInputs.propertyValue) * 100,
+    [calculationInputs.mortgageAmount, calculationInputs.propertyValue]
+  );
+  
+  const deposit = useMemo(() => 
+    calculationInputs.propertyValue - calculationInputs.mortgageAmount,
+    [calculationInputs.propertyValue, calculationInputs.mortgageAmount]
+  );
+
+  // Load user's mortgage profiles and personal info on component mount
+  useEffect(() => {
+    const loadUserData = async () => {
+      if (!user?.id) return;
+      
+      try {
+        // Load mortgage profiles
+        const profiles = await financialProfileService.getMortgageProfiles(user.id);
+        setUserMortgageProfiles(profiles);
+        
+        // Load personal information
+        const personalInfo = await financialProfileService.getPersonalInformation(user.id);
+        setUserPersonalInfo(personalInfo);
+        
+        // If user has mortgage profiles, load the first one as default
+        if (profiles.length > 0) {
+          const firstProfile = profiles[0];
+          const loadedInputs = {
+            propertyValue: firstProfile.property_value,
+            mortgageAmount: firstProfile.mortgage_amount,
+            interestRate: firstProfile.interest_rate,
+            termYears: firstProfile.term_years,
+            paymentType: firstProfile.payment_type as "repayment" | "interest-only",
+            extraPayment: firstProfile.extra_payment,
+            startDate: firstProfile.start_date,
+            fixedRateEndDate: firstProfile.fixed_rate_end_date || getFixedRateEndDate(),
+            variableRate: firstProfile.variable_rate || 8.0,
+            variableRateEnabled: firstProfile.variable_rate_enabled,
+          };
+          
+          setInputs(loadedInputs);
+          setCalculationInputs(loadedInputs);
+          setCurrentProfileName(firstProfile.name);
+          setIsDefaultProfile(false);
+          setProfileLastUpdated(firstProfile.updated_at || firstProfile.created_at);
+        } else {
+          setCurrentProfileName("Default Calculator");
+          setIsDefaultProfile(true);
+          setProfileLastUpdated("");
+        }
+      } catch (err) {
+        console.error('Error loading user data:', err);
+      }
+    };
+
+    if (user) {
+      loadUserData();
+    }
+  }, [user]);
+
+  // Show loading state while checking authentication
+  if (!isLoaded) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-gray-600 dark:text-gray-300">Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Show sign-in page if not authenticated
+  if (!isSignedIn) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-white to-green-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">
+        <div className="w-full max-w-md">
+          <div className="text-center mb-8">
+            <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">
+              Mortgage Calculator
+            </h1>
+            <p className="text-gray-600 dark:text-gray-300">
+              Please sign in to access your personal mortgage calculator
+            </p>
+          </div>
+          <SignIn 
+            appearance={{
+              elements: {
+                formButtonPrimary: 'bg-blue-600 hover:bg-blue-700 text-sm normal-case',
+                card: 'shadow-lg border-0',
+              }
+            }}
+          />
+        </div>
+      </div>
+    );
+  }
 
   const handleTempInputChange = (field: keyof MortgageInputs, value: string | number | boolean) => {
     setTempInputs(prev => prev ? ({
@@ -254,13 +317,6 @@ export default function MortgagePage() {
     }
   };
 
-  const handleUpdateCalculations = async () => {
-    setIsUpdating(true);
-    // Add a small delay to show the loading state
-    await new Promise(resolve => setTimeout(resolve, 300));
-    setCalculationInputs(inputs);
-    setIsUpdating(false);
-  };
 
   const handleSaveCalculation = async (name: string) => {
     await saveMortgageCalculation({
@@ -300,49 +356,6 @@ export default function MortgagePage() {
     setProfileLastUpdated(calculation.updated_at || calculation.created_at);
     setShowSaveLoadDialog(false);
   };
-
-  // Helper function to calculate months between two dates
-  const getMonthsBetween = (startDate: string, endDate: string): number => {
-    const start = new Date(startDate);
-    const end = new Date(endDate);
-    const yearDiff = end.getFullYear() - start.getFullYear();
-    const monthDiff = end.getMonth() - start.getMonth();
-    return yearDiff * 12 + monthDiff;
-  };
-
-  // Helper function to add months to a date
-  const addMonthsToDate = (date: string, months: number): string => {
-    const d = new Date(date);
-    d.setMonth(d.getMonth() + months);
-    return d.toISOString().split('T')[0];
-  };
-
-  // Calculate fixed rate period
-  const fixedRateMonths = calculationInputs.variableRateEnabled 
-    ? getMonthsBetween(calculationInputs.startDate, calculationInputs.fixedRateEndDate)
-    : calculationInputs.termYears * 12;
-
-  // Calculate variable rate period
-  const variableRateMonths = calculationInputs.variableRateEnabled 
-    ? (calculationInputs.termYears * 12) - fixedRateMonths
-    : 0;
-
-  // Calculate rates
-  const fixedMonthlyRate = calculationInputs.interestRate / 100 / 12;
-  const variableMonthlyRate = calculationInputs.variableRateEnabled 
-    ? calculationInputs.variableRate / 100 / 12 
-    : fixedMonthlyRate;
-
-  const totalPayments = calculationInputs.termYears * 12;
-
-  // For display purposes, calculate initial monthly payment using fixed rate
-  const initialMonthlyPayment = calculationInputs.paymentType === "repayment" 
-    ? calculationInputs.mortgageAmount * (fixedMonthlyRate * Math.pow(1 + fixedMonthlyRate, totalPayments)) / (Math.pow(1 + fixedMonthlyRate, totalPayments) - 1)
-    : calculationInputs.mortgageAmount * fixedMonthlyRate;
-
-  // Calculate total interest and amount will be done in the amortization schedule
-  const ltv = (calculationInputs.mortgageAmount / calculationInputs.propertyValue) * 100;
-  const deposit = calculationInputs.propertyValue - calculationInputs.mortgageAmount;
 
   // Generate amortization schedule
   const amortizationSchedule = useMemo((): AmortizationEntry[] => {
@@ -417,23 +430,23 @@ export default function MortgagePage() {
 
   const totalAmount = calculationInputs.mortgageAmount + totalInterest;
 
-  // Payment breakdown chart data
-  const paymentBreakdownData = useMemo(() => {
+
+  // Payment breakdown chart data for radial chart
+  const paymentRadialData = useMemo(() => {
     if (calculationInputs.paymentType === "interest-only") {
       const firstPayment = amortizationSchedule[0];
-      if (!firstPayment) return [];
-      
-      return [
-        { name: 'Interest', value: firstPayment.payment, fill: 'var(--chart-1)' }
-      ];
+      if (!firstPayment) return [{ principal: 0, interest: 0 }];
+      return [{ principal: 0, interest: firstPayment.payment }];
     }
 
     const firstPayment = amortizationSchedule[0];
-    if (!firstPayment) return [];
+    if (!firstPayment) return [{ principal: 0, interest: 0 }];
 
     return [
-      { name: 'Principal', value: firstPayment.principal, fill: 'var(--chart-1)' },
-      { name: 'Interest', value: firstPayment.interest, fill: 'var(--chart-2)' }
+      { 
+        principal: firstPayment.principal, 
+        interest: firstPayment.interest 
+      }
     ];
   }, [calculationInputs.paymentType, amortizationSchedule]);
 
@@ -531,14 +544,10 @@ export default function MortgagePage() {
         </div>
 
         <Tabs defaultValue="calculator" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-4">
+          <TabsList className="grid w-full grid-cols-3">
             <TabsTrigger value="calculator" className="flex items-center gap-2">
               <Calculator className="h-4 w-4" />
               Calculator
-            </TabsTrigger>
-            <TabsTrigger value="breakdown" className="flex items-center gap-2">
-              <PieChart className="h-4 w-4" />
-              Breakdown
             </TabsTrigger>
             <TabsTrigger value="schedule" className="flex items-center gap-2">
               <Calendar className="h-4 w-4" />
@@ -557,7 +566,7 @@ export default function MortgagePage() {
                 <div className="flex items-center justify-between">
                   <div>
                     <div className="flex items-center gap-2 mb-1">
-                      <CardTitle>Active Profile: "{currentProfileName}"</CardTitle>
+                      <CardTitle>Active Profile: &quot;{currentProfileName}&quot;</CardTitle>
                       {isDefaultProfile ? (
                         <span className="text-xs bg-blue-100 text-blue-600 px-2 py-1 rounded-full">
                           Default
@@ -601,148 +610,359 @@ export default function MortgagePage() {
               </CardHeader>
             </Card>
 
-            {/* Key Metrics */}
+            {/* Key Metrics - Engaging Radial Charts */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+              {/* Card 1: Total Amounts */}
               <Card>
-                <CardHeader className="pb-2">
+                <CardHeader className="pb-0">
+                  <CardTitle className="text-sm font-medium text-slate-600 dark:text-slate-400">
+                    Total Amounts
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="flex flex-col items-center justify-center py-0 px-2">
+                  <ChartContainer
+                    config={paymentChartConfig}
+                    className="mx-auto w-full max-w-[280px] h-[200px] pt-6"
+                  >
+                    <RadialBarChart
+                      data={[{ 
+                        principal: calculationInputs.mortgageAmount, 
+                        interest: totalInterest 
+                      }]}
+                      endAngle={180}
+                      innerRadius={70}
+                      outerRadius={120}
+                    >
+                      <ChartTooltip
+                        cursor={false}
+                        content={<ChartTooltipContent hideLabel />}
+                      />
+                      <PolarRadiusAxis tick={false} tickLine={false} axisLine={false}>
+                        <RechartsLabel
+                          content={(props: any) => {
+                            const { viewBox } = props;
+                            if (viewBox && "cx" in viewBox && "cy" in viewBox) {
+                              return (
+                                <text x={viewBox.cx} y={viewBox.cy} textAnchor="middle">
+                                  <tspan
+                                    x={viewBox.cx}
+                                    y={viewBox.cy}
+                                    className="fill-foreground text-lg font-bold"
+                                  >
+                                    ${totalAmount.toLocaleString('en-US', { maximumFractionDigits: 0 })}
+                                  </tspan>
+                                </text>
+                              )
+                            }
+                            return null;
+                          }}
+                        />
+                      </PolarRadiusAxis>
+                      <RadialBar
+                        dataKey="interest"
+                        stackId="a"
+                        cornerRadius={5}
+                        fill="var(--color-Interest)"
+                        className="stroke-transparent stroke-2"
+                      />
+                      <RadialBar
+                        dataKey="principal"
+                        stackId="a"
+                        cornerRadius={5}
+                        fill="var(--color-Principal)"
+                        className="stroke-transparent stroke-2"
+                      />
+                    </RadialBarChart>
+                  </ChartContainer>
+                  <div className="text-center -mt-1">
+                    <div className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
+                      You will pay a total interest of <span className="font-bold text-slate-900 dark:text-slate-100">${totalInterest.toLocaleString('en-US', { maximumFractionDigits: 0 })}</span> on mortgage loan of <span className="font-bold text-slate-900 dark:text-slate-100">${calculationInputs.mortgageAmount.toLocaleString('en-US', { maximumFractionDigits: 0 })}</span> over the next <span className="font-bold text-slate-900 dark:text-slate-100">{calculationInputs.termYears}</span> Years
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Card 2: Monthly Payment */}
+              <Card>
+                <CardHeader className="pb-0">
                   <CardTitle className="text-sm font-medium text-slate-600 dark:text-slate-400">
                     Monthly Payment
                   </CardTitle>
                 </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold text-slate-900 dark:text-slate-100">
-                    ${initialMonthlyPayment.toLocaleString('en-US', { maximumFractionDigits: 0 })}
+                <CardContent className="flex flex-col items-center justify-center py-0 px-2">
+                  <ChartContainer
+                    config={paymentChartConfig}
+                    className="mx-auto w-full max-w-[280px] h-[200px] pt-6"
+                  >
+                    <RadialBarChart
+                      data={paymentRadialData}
+                      endAngle={180}
+                      innerRadius={70}
+                      outerRadius={120}
+                    >
+                      <ChartTooltip
+                        cursor={false}
+                        content={<ChartTooltipContent hideLabel />}
+                      />
+                      <PolarRadiusAxis tick={false} tickLine={false} axisLine={false}>
+                        <RechartsLabel
+                          content={(props: any) => {
+                            const { viewBox } = props;
+                            if (viewBox && "cx" in viewBox && "cy" in viewBox) {
+                              return (
+                                <text x={viewBox.cx} y={viewBox.cy} textAnchor="middle">
+                                  <tspan
+                                    x={viewBox.cx}
+                                    y={viewBox.cy}
+                                    className="fill-foreground text-lg font-bold"
+                                  >
+                                    ${initialMonthlyPayment.toLocaleString('en-US', { maximumFractionDigits: 0 })}
+                                  </tspan>
+                                </text>
+                              )
+                            }
+                            return null;
+                          }}
+                        />
+                      </PolarRadiusAxis>
+                      <RadialBar
+                        dataKey="interest"
+                        stackId="a"
+                        cornerRadius={5}
+                        fill="var(--color-Interest)"
+                        className="stroke-transparent stroke-2"
+                      />
+                      <RadialBar
+                        dataKey="principal"
+                        stackId="a"
+                        cornerRadius={5}
+                        fill="var(--color-Principal)"
+                        className="stroke-transparent stroke-2"
+                      />
+                    </RadialBarChart>
+                  </ChartContainer>
+                  <div className="text-center -mt-1">
+                    <div className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
+                      Your monthly payment of <span className="font-bold text-slate-900 dark:text-slate-100">${initialMonthlyPayment.toLocaleString('en-US', { maximumFractionDigits: 0 })}</span> includes <span className="font-bold text-slate-900 dark:text-slate-100">${paymentRadialData[0]?.principal.toLocaleString('en-US', { maximumFractionDigits: 0 }) || '0'}</span> principal and <span className="font-bold text-slate-900 dark:text-slate-100">${paymentRadialData[0]?.interest.toLocaleString('en-US', { maximumFractionDigits: 0 }) || '0'}</span> interest
+                    </div>
                   </div>
                 </CardContent>
               </Card>
 
+              {/* Card 3: Loan-to-Value */}
               <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-medium text-slate-600 dark:text-slate-400">
-                    Total Interest
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold text-slate-900 dark:text-slate-100">
-                    ${totalInterest.toLocaleString('en-US', { maximumFractionDigits: 0 })}
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-medium text-slate-600 dark:text-slate-400">
-                    Total Amount
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold text-slate-900 dark:text-slate-100">
-                    ${totalAmount.toLocaleString('en-US', { maximumFractionDigits: 0 })}
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader className="pb-2">
+                <CardHeader className="pb-0">
                   <CardTitle className="text-sm font-medium text-slate-600 dark:text-slate-400">
                     Loan-to-Value
                   </CardTitle>
                 </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold text-slate-900 dark:text-slate-100">
-                    {ltv.toFixed(1)}%
+                <CardContent className="flex flex-col items-center justify-center py-0 px-2">
+                  <ChartContainer
+                    config={{
+                      Loan: {
+                        label: "Your Loan",
+                        color: "var(--chart-1)",
+                      },
+                      Deposit: {
+                        label: "Your Deposit", 
+                        color: "var(--chart-2)",
+                      },
+                    }}
+                    className="mx-auto w-full max-w-[280px] h-[200px] pt-6"
+                  >
+                    <RadialBarChart
+                      data={[{ 
+                        Loan: calculationInputs.mortgageAmount, 
+                        Deposit: deposit 
+                      }]}
+                      endAngle={180}
+                      innerRadius={70}
+                      outerRadius={120}
+                    >
+                      <ChartTooltip
+                        cursor={false}
+                        content={<ChartTooltipContent hideLabel />}
+                      />
+                      <PolarRadiusAxis tick={false} tickLine={false} axisLine={false}>
+                        <RechartsLabel
+                          content={(props: any) => {
+                            const { viewBox } = props;
+                            if (viewBox && "cx" in viewBox && "cy" in viewBox) {
+                              return (
+                                <text x={viewBox.cx} y={viewBox.cy} textAnchor="middle">
+                                  <tspan
+                                    x={viewBox.cx}
+                                    y={viewBox.cy}
+                                    className="fill-foreground text-lg font-bold"
+                                  >
+                                    {ltv.toFixed(1)}%
+                                  </tspan>
+                                </text>
+                              )
+                            }
+                            return null;
+                          }}
+                        />
+                      </PolarRadiusAxis>
+                      <RadialBar
+                        dataKey="Deposit"
+                        stackId="a"
+                        cornerRadius={5}
+                        fill="var(--color-Deposit)"
+                        className="stroke-transparent stroke-2"
+                      />
+                      <RadialBar
+                        dataKey="Loan"
+                        stackId="a"
+                        cornerRadius={5}
+                        fill="var(--color-Loan)"
+                        className="stroke-transparent stroke-2"
+                      />
+                    </RadialBarChart>
+                  </ChartContainer>
+                  <div className="text-center -mt-1">
+                    <div className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
+                      You're borrowing <span className="font-bold text-slate-900 dark:text-slate-100">{ltv.toFixed(1)}%</span> of your <span className="font-bold text-slate-900 dark:text-slate-100">${calculationInputs.propertyValue.toLocaleString('en-US', { maximumFractionDigits: 0 })}</span> home value with a <span className="font-bold text-slate-900 dark:text-slate-100">${deposit.toLocaleString('en-US', { maximumFractionDigits: 0 })}</span> deposit
+                    </div>
                   </div>
-                  <div className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                    Deposit: ${deposit.toLocaleString('en-US', { maximumFractionDigits: 0 })}
+                </CardContent>
+              </Card>
+
+              {/* Card 4: Affordability Check */}
+              <Card>
+                <CardHeader className="pb-0">
+                  <CardTitle className="text-sm font-medium text-slate-600 dark:text-slate-400">
+                    Affordability Check
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="flex flex-col items-center justify-center py-0 px-2">
+                  <ChartContainer
+                    config={{
+                      Payment: {
+                        label: "Your Payment",
+                        color: "var(--chart-1)",
+                      },
+                      Remaining: {
+                        label: "Remaining Income", 
+                        color: "var(--chart-2)",
+                      },
+                    }}
+                    className="mx-auto w-full max-w-[280px] h-[200px] pt-6"
+                  >
+                    <RadialBarChart
+                      data={[{ 
+                        Payment: initialMonthlyPayment, 
+                        Remaining: (initialMonthlyPayment / 0.28) - initialMonthlyPayment
+                      }]}
+                      endAngle={180}
+                      innerRadius={70}
+                      outerRadius={120}
+                    >
+                      <ChartTooltip
+                        cursor={false}
+                        content={<ChartTooltipContent hideLabel />}
+                      />
+                      <PolarRadiusAxis tick={false} tickLine={false} axisLine={false}>
+                        <RechartsLabel
+                          content={(props: any) => {
+                            const { viewBox } = props;
+                            if (viewBox && "cx" in viewBox && "cy" in viewBox) {
+                              return (
+                                <text x={viewBox.cx} y={viewBox.cy} textAnchor="middle">
+                                  <tspan
+                                    x={viewBox.cx}
+                                    y={viewBox.cy}
+                                    className="fill-foreground text-lg font-bold"
+                                  >
+                                    ${Math.ceil(initialMonthlyPayment / 0.28).toLocaleString('en-US', { maximumFractionDigits: 0 })}
+                                  </tspan>
+                                </text>
+                              )
+                            }
+                            return null;
+                          }}
+                        />
+                      </PolarRadiusAxis>
+                      <RadialBar
+                        dataKey="Remaining"
+                        stackId="a"
+                        cornerRadius={5}
+                        fill="var(--color-Remaining)"
+                        className="stroke-transparent stroke-2"
+                      />
+                      <RadialBar
+                        dataKey="Payment"
+                        stackId="a"
+                        cornerRadius={5}
+                        fill="var(--color-Payment)"
+                        className="stroke-transparent stroke-2"
+                      />
+                    </RadialBarChart>
+                  </ChartContainer>
+                  <div className="text-center -mt-1">
+                    <div className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
+                      You need <span className="font-bold text-slate-900 dark:text-slate-100">${Math.ceil(initialMonthlyPayment / 0.28).toLocaleString('en-US', { maximumFractionDigits: 0 })}</span> monthly income to comfortably afford this <span className="font-bold text-slate-900 dark:text-slate-100">${initialMonthlyPayment.toLocaleString('en-US', { maximumFractionDigits: 0 })}</span> payment
+                  </div>
                   </div>
                 </CardContent>
               </Card>
             </div>
 
-            {/* Combined Amortization Chart */}
+            {/* Amortization Charts Section */}
             <AmortizationChart 
               amortizationSchedule={amortizationSchedule}
               mortgageAmount={calculationInputs.mortgageAmount}
             />
-          </TabsContent>
 
-          <TabsContent value="breakdown" className="space-y-6">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* Payment Breakdown Chart */}
+            {/* Additional Payment Impact Analysis */}
+            <AdditionalPaymentChart
+              amortizationSchedule={amortizationSchedule}
+              mortgageAmount={calculationInputs.mortgageAmount}
+              interestRate={calculationInputs.interestRate}
+              termYears={calculationInputs.termYears}
+              paymentType={calculationInputs.paymentType}
+              userDateOfBirth={userPersonalInfo?.date_of_birth}
+              mortgageStartDate={calculationInputs.startDate}
+            />
+
+            {/* Extra Payment Impact */}
+            {extraPaymentImpact && (
               <Card>
                 <CardHeader>
-                  <CardTitle>Payment Breakdown</CardTitle>
+                  <CardTitle className="flex items-center gap-2">
+                    <DollarSign className="h-5 w-5" />
+                    Extra Payment Impact
+                  </CardTitle>
                   <CardDescription>
-                    Visual breakdown of your monthly payment
+                    Impact of additional monthly payments
                   </CardDescription>
                 </CardHeader>
-                <CardContent>
-                  <ChartContainer config={paymentChartConfig} className="h-64">
-                    <PieChart>
-                      <Pie
-                        data={paymentBreakdownData}
-                        dataKey="value"
-                        nameKey="name"
-                        cx="50%"
-                        cy="50%"
-                        outerRadius={80}
-                        innerRadius={40}
-                        strokeWidth={0}
-                      >
-                        {paymentBreakdownData.map((entry, index) => (
-                          <Cell key={`cell-${index}`} fill={entry.fill} />
-                        ))}
-                      </Pie>
-                      <ChartTooltip 
-                        content={<ChartTooltipContent 
-                          formatter={(value, name) => [
-                            `$${Number(value).toLocaleString()}`,
-                            paymentChartConfig[name as keyof typeof paymentChartConfig]?.label || name
-                          ]}
-                        />}
-                      />
-                    </PieChart>
-                  </ChartContainer>
+                <CardContent className="space-y-4">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="text-center p-4 bg-green-50 dark:bg-green-950 rounded-lg">
+                      <div className="text-2xl font-bold text-green-600 dark:text-green-400">
+                        ${extraPaymentImpact.interestSaved.toLocaleString('en-US', { maximumFractionDigits: 0 })}
+                      </div>
+                      <div className="text-sm text-green-600 dark:text-green-400">Interest Saved</div>
+                    </div>
+                    <div className="text-center p-4 bg-blue-50 dark:bg-blue-950 rounded-lg">
+                      <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">
+                        {Math.floor(extraPaymentImpact.timeSaved / 12)}y {extraPaymentImpact.timeSaved % 12}m
+                      </div>
+                      <div className="text-sm text-blue-600 dark:text-blue-400">Time Saved</div>
+                    </div>
+                  </div>
+                  <div className="text-center p-4 bg-slate-50 dark:bg-slate-800 rounded-lg">
+                    <div className="text-lg font-semibold text-slate-900 dark:text-slate-100">
+                      New Term: {Math.floor(extraPaymentImpact.newTerm / 12)} years {extraPaymentImpact.newTerm % 12} months
+                    </div>
+                  </div>
                 </CardContent>
               </Card>
+            )}
 
-              {/* Extra Payment Impact */}
-              {extraPaymentImpact && (
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <DollarSign className="h-5 w-5" />
-                      Extra Payment Impact
-                    </CardTitle>
-                    <CardDescription>
-                      Impact of additional monthly payments
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="text-center p-4 bg-green-50 dark:bg-green-950 rounded-lg">
-                        <div className="text-2xl font-bold text-green-600 dark:text-green-400">
-                          ${extraPaymentImpact.interestSaved.toLocaleString('en-US', { maximumFractionDigits: 0 })}
-                        </div>
-                        <div className="text-sm text-green-600 dark:text-green-400">Interest Saved</div>
-                      </div>
-                      <div className="text-center p-4 bg-blue-50 dark:bg-blue-950 rounded-lg">
-                        <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">
-                          {Math.floor(extraPaymentImpact.timeSaved / 12)}y {extraPaymentImpact.timeSaved % 12}m
-                        </div>
-                        <div className="text-sm text-blue-600 dark:text-blue-400">Time Saved</div>
-                      </div>
-                    </div>
-                    <div className="text-center p-4 bg-slate-50 dark:bg-slate-800 rounded-lg">
-                      <div className="text-lg font-semibold text-slate-900 dark:text-slate-100">
-                        New Term: {Math.floor(extraPaymentImpact.newTerm / 12)} years {extraPaymentImpact.newTerm % 12} months
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
-            </div>
           </TabsContent>
+
 
           <TabsContent value="schedule" className="space-y-6">
             {/* Detailed Schedule Table */}

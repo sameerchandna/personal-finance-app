@@ -3,7 +3,7 @@
 import { useState, useMemo } from "react";
 import { useUser } from '@clerk/nextjs';
 import { SignIn } from '@clerk/nextjs';
-import { useSavedCalculations } from '@/hooks/useSavedCalculations';
+import { useSavedCalculations, SavedInvestmentCalculation } from '@/hooks/useSavedCalculations';
 import { SaveLoadDialog } from '@/components/save-load-dialog';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -55,7 +55,256 @@ interface InvestmentResults {
 }
 
 export default function InvestmentCalculator() {
-  const { isSignedIn, isLoaded } = useUser();
+  const { isSignedIn, isLoaded, user } = useUser();
+  const { 
+    investmentCalculations, 
+    saveInvestmentCalculation, 
+    deleteInvestmentCalculation,
+    loading: calculationsLoading 
+  } = useSavedCalculations(user);
+  
+  const [showSaveLoadDialog, setShowSaveLoadDialog] = useState(false);
+
+  const [inputs, setInputs] = useState<InvestmentInputs>({
+    initialAmount: 10000,
+    monthlyContribution: 500,
+    annualReturnRate: 7,
+    investmentYears: 20,
+    contributionFrequency: "monthly"
+  });
+
+  const [displayInputs, setDisplayInputs] = useState<InvestmentInputs>({
+    initialAmount: 10000,
+    monthlyContribution: 500,
+    annualReturnRate: 7,
+    investmentYears: 20,
+    contributionFrequency: "monthly"
+  });
+
+  const [isFormExpanded, setIsFormExpanded] = useState(false);
+  const [isUpdating, setIsUpdating] = useState(false);
+  
+  // Rate comparison settings
+  const [rateSettings, setRateSettings] = useState({
+    conservative: 3,
+    moderate: 7,
+    aggressive: 10
+  });
+  const [showRateSettings, setShowRateSettings] = useState(false);
+
+  const calculateInvestment = useMemo((): InvestmentResults => {
+    const { initialAmount, monthlyContribution, annualReturnRate, investmentYears, contributionFrequency } = displayInputs;
+    
+    // Convert annual rate to monthly
+    const monthlyRate = annualReturnRate / 100 / 12;
+    
+    // Calculate contribution frequency multiplier
+    const frequencyMultiplier = contributionFrequency === "monthly" ? 1 : 
+                               contributionFrequency === "quarterly" ? 3 : 12;
+    
+    // The contribution amount should be the same regardless of frequency
+    // For quarterly: we contribute the same amount but only 4 times per year
+    // For annually: we contribute the same amount but only 1 time per year
+    const contributionAmount = monthlyContribution;
+    
+    // Track different components separately
+    let originalAmountValue = initialAmount;
+    let totalRegularContributions = 0;
+    let totalRegularContributionsValue = 0;
+    const yearlyBreakdown = [];
+    
+    // Add Year 0 (initial state)
+    yearlyBreakdown.push({
+      year: 0,
+      invested: initialAmount,
+      value: initialAmount,
+      interest: 0,
+      originalAmount: initialAmount,
+      originalInterest: 0,
+      regularContributions: 0,
+      regularInterest: 0
+    });
+    
+    // Calculate year by year
+    for (let year = 1; year <= investmentYears; year++) {
+      const yearRegularContributions = 0;
+      
+      // Calculate monthly compounding for this year
+      for (let month = 1; month <= 12; month++) {
+        // Add contribution at the beginning of the month
+        let shouldAddContribution = false;
+        if (frequencyMultiplier === 1) {
+          // Monthly: add every month
+          shouldAddContribution = true;
+        } else if (frequencyMultiplier === 3) {
+          // Quarterly: add in months 1, 4, 7, 10
+          shouldAddContribution = (month - 1) % 3 === 0;
+        } else {
+          // Annually: add only in month 1
+          shouldAddContribution = month === 1;
+        }
+        
+        if (shouldAddContribution) {
+          totalRegularContributions += contributionAmount;
+          totalRegularContributionsValue += contributionAmount;
+        }
+        
+        // Apply monthly interest to all current value
+        const currentValue = originalAmountValue + totalRegularContributionsValue;
+        const monthlyInterest = currentValue * monthlyRate;
+        
+        // Distribute interest proportionally
+        const originalProportion = originalAmountValue / currentValue;
+        const regularProportion = totalRegularContributionsValue / currentValue;
+        
+        originalAmountValue += monthlyInterest * originalProportion;
+        totalRegularContributionsValue += monthlyInterest * regularProportion;
+      }
+      
+      // Calculate totals for this year
+      const totalValue = originalAmountValue + totalRegularContributionsValue;
+      const totalInvested = initialAmount + totalRegularContributions;
+      const totalInterest = totalValue - totalInvested;
+      
+      // Calculate interest components
+      const originalInterest = originalAmountValue - initialAmount;
+      const regularInterest = totalRegularContributionsValue - totalRegularContributions;
+      
+      yearlyBreakdown.push({
+        year,
+        invested: totalInvested,
+        value: totalValue,
+        interest: totalInterest,
+        originalAmount: originalAmountValue,
+        originalInterest,
+        regularContributions: totalRegularContributions,
+        regularInterest
+      });
+    }
+    
+    const finalValue = originalAmountValue + totalRegularContributionsValue;
+    const totalInvested = initialAmount + totalRegularContributions;
+    const totalInterest = finalValue - totalInvested;
+    
+    // Calculate what the initial amount would be worth without regular contributions
+    const withoutRegularSavings = {
+      finalValue: initialAmount * Math.pow(1 + annualReturnRate / 100, investmentYears),
+      totalInterest: initialAmount * Math.pow(1 + annualReturnRate / 100, investmentYears) - initialAmount
+    };
+    
+    return {
+      totalInvested,
+      finalValue,
+      totalInterest,
+      yearlyBreakdown,
+      withoutRegularSavings
+    };
+  }, [displayInputs]);
+
+  const calculateRateComparison = useMemo(() => {
+    const { initialAmount, monthlyContribution, investmentYears, contributionFrequency } = displayInputs;
+    
+    const frequencyMultiplier = contributionFrequency === "monthly" ? 1 : 
+                               contributionFrequency === "quarterly" ? 3 : 12;
+    const contributionAmount = monthlyContribution;
+    
+    return Object.entries(rateSettings).map(([strategy, rate]) => {
+      const monthlyRate = rate / 100 / 12;
+      
+      let totalValue = initialAmount;
+      let totalContributions = 0;
+      
+      for (let year = 1; year <= investmentYears; year++) {
+        for (let month = 1; month <= 12; month++) {
+          let shouldAddContribution = false;
+          if (frequencyMultiplier === 1) {
+            shouldAddContribution = true;
+          } else if (frequencyMultiplier === 3) {
+            shouldAddContribution = (month - 1) % 3 === 0;
+          } else {
+            shouldAddContribution = month === 1;
+          }
+          
+          if (shouldAddContribution) {
+            totalContributions += contributionAmount;
+            totalValue += contributionAmount;
+          }
+          
+          totalValue *= (1 + monthlyRate);
+        }
+      }
+      
+      return {
+        strategy,
+        rate,
+        finalValue: totalValue,
+        totalInvested: initialAmount + totalContributions,
+        totalInterest: totalValue - (initialAmount + totalContributions)
+      };
+    });
+  }, [displayInputs, rateSettings]);
+
+  const rateComparisonChartData = useMemo(() => {
+    const { initialAmount, monthlyContribution, investmentYears, contributionFrequency } = displayInputs;
+    
+    const frequencyMultiplier = contributionFrequency === "monthly" ? 1 : 
+                               contributionFrequency === "quarterly" ? 3 : 12;
+    const contributionAmount = monthlyContribution;
+    
+    // Create yearly data points for each scenario
+    const yearlyData = [];
+    
+    for (let year = 0; year <= investmentYears; year++) {
+      const yearData: any = { year: `Year ${year}` };
+      
+      // Calculate value for each scenario at this year
+      Object.entries(rateSettings).forEach(([strategy, rate], index) => {
+        const monthlyRate = rate / 100 / 12;
+        let totalValue = initialAmount;
+        let totalContributions = 0;
+        
+        // Calculate up to this year
+        for (let y = 1; y <= year; y++) {
+          for (let month = 1; month <= 12; month++) {
+            let shouldAddContribution = false;
+            if (frequencyMultiplier === 1) {
+              shouldAddContribution = true;
+            } else if (frequencyMultiplier === 3) {
+              shouldAddContribution = (month - 1) % 3 === 0;
+            } else {
+              shouldAddContribution = month === 1;
+            }
+            
+            if (shouldAddContribution) {
+              totalContributions += contributionAmount;
+              totalValue += contributionAmount;
+            }
+            
+            totalValue *= (1 + monthlyRate);
+          }
+        }
+        
+        const scenarioName = `${strategy.charAt(0).toUpperCase() + strategy.slice(1)} (${rate}%)`;
+        yearData[scenarioName] = totalValue;
+      });
+      
+      yearlyData.push(yearData);
+    }
+    
+    return yearlyData;
+  }, [displayInputs, rateSettings]);
+
+  const rateComparisonChartConfig = useMemo(() => {
+    const config: any = {};
+    Object.entries(rateSettings).forEach(([strategy, rate], index) => {
+      const key = `${strategy.charAt(0).toUpperCase() + strategy.slice(1)} (${rate}%)`;
+      config[key] = {
+        label: key,
+        color: index === 0 ? "var(--chart-1)" : index === 1 ? "var(--chart-2)" : "var(--chart-3)",
+      };
+    });
+    return config;
+  }, [rateSettings]);
 
   // Show loading state while checking authentication
   if (!isLoaded) {
@@ -95,153 +344,6 @@ export default function InvestmentCalculator() {
     );
   }
 
-  // Only call hooks after authentication checks
-  const { user } = useUser();
-  const { 
-    investmentCalculations, 
-    saveInvestmentCalculation, 
-    deleteInvestmentCalculation,
-    loading: calculationsLoading 
-  } = useSavedCalculations(user);
-  
-  const [showSaveLoadDialog, setShowSaveLoadDialog] = useState(false);
-
-  const [inputs, setInputs] = useState<InvestmentInputs>({
-    initialAmount: 10000,
-    monthlyContribution: 500,
-    annualReturnRate: 7,
-    investmentYears: 20,
-    contributionFrequency: "monthly"
-  });
-
-  const [displayInputs, setDisplayInputs] = useState<InvestmentInputs>({
-    initialAmount: 10000,
-    monthlyContribution: 500,
-    annualReturnRate: 7,
-    investmentYears: 20,
-    contributionFrequency: "monthly"
-  });
-
-  const [isFormExpanded, setIsFormExpanded] = useState(false);
-  const [isUpdating, setIsUpdating] = useState(false);
-  
-  // Rate comparison settings
-  const [rateSettings, setRateSettings] = useState({
-    conservative: 3,
-    moderate: 7,
-    aggressive: 10
-  });
-  const [showRateSettings, setShowRateSettings] = useState(false);
-
-
-  const calculateInvestment = useMemo((): InvestmentResults => {
-    const { initialAmount, monthlyContribution, annualReturnRate, investmentYears, contributionFrequency } = displayInputs;
-    
-    // Convert annual rate to monthly
-    const monthlyRate = annualReturnRate / 100 / 12;
-    
-    // Calculate contribution frequency multiplier
-    const frequencyMultiplier = contributionFrequency === "monthly" ? 1 : 
-                               contributionFrequency === "quarterly" ? 3 : 12;
-    
-    // The contribution amount should be the same regardless of frequency
-    // For quarterly: we contribute the same amount but only 4 times per year
-    // For annually: we contribute the same amount but only 1 time per year
-    const contributionAmount = monthlyContribution;
-    
-    // Track different components separately
-    let originalAmountValue = initialAmount;
-    let totalRegularContributions = 0;
-    let totalRegularContributionsValue = 0;
-    const yearlyBreakdown = [];
-    
-    // Add Year 0 (initial state)
-    yearlyBreakdown.push({
-      year: 0,
-      invested: initialAmount,
-      value: initialAmount,
-      interest: 0,
-      originalAmount: initialAmount,
-      originalInterest: 0,
-      regularContributions: 0,
-      regularInterest: 0
-    });
-    
-    // Calculate year by year
-    for (let year = 1; year <= investmentYears; year++) {
-      let yearRegularContributions = 0;
-      
-      // Calculate monthly compounding for this year
-      for (let month = 1; month <= 12; month++) {
-        // Add contribution at the beginning of the month
-        let shouldAddContribution = false;
-        if (frequencyMultiplier === 1) {
-          // Monthly: add every month
-          shouldAddContribution = true;
-        } else if (frequencyMultiplier === 3) {
-          // Quarterly: add in months 1, 4, 7, 10
-          shouldAddContribution = (month === 1 || month === 4 || month === 7 || month === 10);
-        } else if (frequencyMultiplier === 12) {
-          // Annually: add only in month 1
-          shouldAddContribution = (month === 1);
-        }
-        
-        if (shouldAddContribution) {
-          console.log(`Year ${year}, Month ${month}: Adding contribution ${contributionAmount} (frequency: ${contributionFrequency})`);
-          totalRegularContributions += contributionAmount;
-          totalRegularContributionsValue += contributionAmount;
-          yearRegularContributions += contributionAmount;
-        }
-        
-        // Apply monthly interest to both components
-        originalAmountValue *= (1 + monthlyRate);
-        totalRegularContributionsValue *= (1 + monthlyRate);
-      }
-      
-      const currentValue = originalAmountValue + totalRegularContributionsValue;
-      const originalInterest = originalAmountValue - initialAmount;
-      const regularInterest = totalRegularContributionsValue - totalRegularContributions;
-      
-      yearlyBreakdown.push({
-        year,
-        invested: initialAmount + totalRegularContributions,
-        value: currentValue,
-        interest: originalInterest + regularInterest,
-        originalAmount: originalAmountValue,
-        originalInterest: originalInterest,
-        regularContributions: totalRegularContributions,
-        regularInterest: regularInterest
-      });
-    }
-    
-    const finalValue = originalAmountValue + totalRegularContributionsValue;
-    const totalInterest = finalValue - (initialAmount + totalRegularContributions);
-    
-    // Calculate without regular savings (only initial amount)
-    const withoutRegularSavingsValue = initialAmount * Math.pow(1 + annualReturnRate / 100, investmentYears);
-    const withoutRegularSavingsInterest = withoutRegularSavingsValue - initialAmount;
-    
-    const result = {
-      totalInvested: initialAmount + totalRegularContributions,
-      finalValue,
-      totalInterest,
-      yearlyBreakdown,
-      withoutRegularSavings: {
-        finalValue: withoutRegularSavingsValue,
-        totalInterest: withoutRegularSavingsInterest
-      }
-    };
-    
-    console.log('Calculation result:', result);
-    console.log('First year breakdown:', result.yearlyBreakdown[0]);
-    console.log('Last year breakdown:', result.yearlyBreakdown[result.yearlyBreakdown.length - 1]);
-    console.log('Total regular contributions:', totalRegularContributions);
-    console.log('Contribution amount:', contributionAmount);
-    console.log('Frequency multiplier:', frequencyMultiplier);
-    
-    return result;
-  }, [displayInputs]);
-
   const handleInputChange = (field: keyof InvestmentInputs, value: string | number) => {
     setInputs(prev => ({
       ...prev,
@@ -277,14 +379,14 @@ export default function InvestmentCalculator() {
       monthlyContribution: calculation.monthly_contribution,
       annualReturnRate: calculation.annual_return_rate,
       investmentYears: calculation.investment_years,
-      contributionFrequency: calculation.contribution_frequency,
+      contributionFrequency: calculation.contribution_frequency as "monthly" | "quarterly" | "annually",
     });
     setDisplayInputs({
       initialAmount: calculation.initial_amount,
       monthlyContribution: calculation.monthly_contribution,
       annualReturnRate: calculation.annual_return_rate,
       investmentYears: calculation.investment_years,
-      contributionFrequency: calculation.contribution_frequency,
+      contributionFrequency: calculation.contribution_frequency as "monthly" | "quarterly" | "annually",
     });
     setShowSaveLoadDialog(false);
   };
@@ -298,67 +400,6 @@ export default function InvestmentCalculator() {
     }).format(amount);
   };
 
-  const formatPercentage = (rate: number) => {
-    return `${rate}%`;
-  };
-
-  // Calculate rate comparison scenarios
-  const calculateRateComparison = useMemo(() => {
-    const { initialAmount, monthlyContribution, investmentYears, contributionFrequency } = displayInputs;
-    
-    const frequencyMultiplier = contributionFrequency === "monthly" ? 1 : 
-                               contributionFrequency === "quarterly" ? 3 : 12;
-    const contributionAmount = monthlyContribution;
-    
-    const scenarios = Object.entries(rateSettings).map(([name, rate]) => {
-      const monthlyRate = rate / 100 / 12;
-      let originalAmountValue = initialAmount;
-      let totalRegularContributions = 0;
-      let totalRegularContributionsValue = 0;
-      const yearlyData = [];
-      
-      // Add Year 0
-      yearlyData.push({
-        year: 0,
-        value: initialAmount
-      });
-      
-      // Calculate year by year
-      for (let year = 1; year <= investmentYears; year++) {
-        for (let month = 1; month <= 12; month++) {
-          let shouldAddContribution = false;
-          if (frequencyMultiplier === 1) {
-            shouldAddContribution = true;
-          } else if (frequencyMultiplier === 3) {
-            shouldAddContribution = (month === 1 || month === 4 || month === 7 || month === 10);
-          } else if (frequencyMultiplier === 12) {
-            shouldAddContribution = (month === 1);
-          }
-          
-          if (shouldAddContribution) {
-            totalRegularContributions += contributionAmount;
-            totalRegularContributionsValue += contributionAmount;
-          }
-          
-          originalAmountValue *= (1 + monthlyRate);
-          totalRegularContributionsValue *= (1 + monthlyRate);
-        }
-        
-        yearlyData.push({
-          year,
-          value: originalAmountValue + totalRegularContributionsValue
-        });
-      }
-      
-      return {
-        name,
-        rate,
-        data: yearlyData
-      };
-    });
-    
-    return scenarios;
-  }, [displayInputs, rateSettings]);
 
   // Chart data for growth over time (4-Component Stacked Bar Chart)
   const growthChartData = calculateInvestment.yearlyBreakdown.map(item => ({
@@ -368,22 +409,6 @@ export default function InvestmentCalculator() {
     regularContributions: item.regularContributions,
     regularInterest: item.regularInterest,
   }));
-  
-  // Rate comparison chart data
-  const rateComparisonChartData = useMemo(() => {
-    if (!calculateRateComparison[0]?.data) return [];
-    
-    const years = calculateRateComparison[0].data.map(item => `Year ${item.year}`);
-    
-    return years.map((year, yearIndex) => {
-      const dataPoint: any = { year };
-      calculateRateComparison.forEach((scenario, scenarioIndex) => {
-        const scenarioName = `${scenario.name.charAt(0).toUpperCase() + scenario.name.slice(1)} (${scenario.rate}%)`;
-        dataPoint[scenarioName] = scenario.data[yearIndex]?.value || 0;
-      });
-      return dataPoint;
-    });
-  }, [calculateRateComparison]);
 
   // Chart configuration for shadcn charts - consistent color mapping
   const growthChartConfig = {
@@ -405,17 +430,6 @@ export default function InvestmentCalculator() {
     },
   };
 
-  const rateComparisonChartConfig = useMemo(() => {
-    const config: any = {};
-    calculateRateComparison.forEach((scenario, index) => {
-      const scenarioName = `${scenario.name.charAt(0).toUpperCase() + scenario.name.slice(1)} (${scenario.rate}%)`;
-      config[scenarioName] = {
-        label: scenarioName,
-        color: `var(--chart-${index + 1})`,
-      };
-    });
-    return config;
-  }, [calculateRateComparison]);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-green-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">
@@ -668,25 +682,36 @@ export default function InvestmentCalculator() {
                   See how original amount, regular contributions, and their respective interest earnings build wealth over time
                 </CardDescription>
               </CardHeader>
-              <CardContent>
-                <ChartContainer config={growthChartConfig} className="h-96">
-                  <BarChart accessibilityLayer data={growthChartData}>
+              <CardContent className="p-2">
+                <ChartContainer config={growthChartConfig} className="h-96 w-full">
+                  <BarChart 
+                    accessibilityLayer 
+                    data={growthChartData}
+                    margin={{
+                      left: 4,
+                      right: 4,
+                      top: 4,
+                      bottom: 40,
+                    }}
+                  >
                     <CartesianGrid vertical={false} />
                     <XAxis
                       dataKey="year"
                       tickLine={false}
-                      tickMargin={10}
+                      tickMargin={6}
                       axisLine={false}
-                      tick={{ fontSize: 12 }}
+                      tick={{ fontSize: 9 }}
                       angle={-45}
                       textAnchor="end"
-                      height={80}
+                      height={40}
+                      interval={0}
                     />
                     <YAxis 
-                      tick={{ fontSize: 12 }}
+                      tick={{ fontSize: 9 }}
                       tickFormatter={(value) => formatCurrency(value)}
                       tickLine={false}
                       axisLine={false}
+                      width={55}
                     />
                     <ChartTooltip content={<ChartTooltipContent hideLabel />} />
                     <ChartLegend content={<ChartLegendContent />} />
@@ -739,14 +764,16 @@ export default function InvestmentCalculator() {
                   </Button>
                 </div>
               </CardHeader>
-              <CardContent>
-                <ChartContainer config={rateComparisonChartConfig} className="h-96">
+              <CardContent className="p-2">
+                <ChartContainer config={rateComparisonChartConfig} className="h-96 w-full">
                   <LineChart
                     accessibilityLayer
                     data={rateComparisonChartData}
                     margin={{
-                      left: 12,
-                      right: 12,
+                      left: 4,
+                      right: 4,
+                      top: 4,
+                      bottom: 4,
                     }}
                   >
                     <CartesianGrid vertical={false} />
@@ -754,22 +781,20 @@ export default function InvestmentCalculator() {
                       dataKey="year"
                       tickLine={false}
                       axisLine={false}
-                      tickMargin={8}
-                      tick={{ fontSize: 12 }}
-                      angle={-45}
-                      textAnchor="end"
-                      height={80}
+                      tickMargin={4}
+                      tick={{ fontSize: 9 }}
                     />
                     <YAxis 
-                      tick={{ fontSize: 12 }}
+                      tick={{ fontSize: 9 }}
                       tickFormatter={(value) => formatCurrency(value)}
                       tickLine={false}
                       axisLine={false}
+                      width={55}
                     />
                     <ChartTooltip cursor={false} content={<ChartTooltipContent />} />
                     <ChartLegend content={<ChartLegendContent />} />
-                    {calculateRateComparison.map((scenario, index) => {
-                      const scenarioName = `${scenario.name.charAt(0).toUpperCase() + scenario.name.slice(1)} (${scenario.rate}%)`;
+                    {Object.entries(rateSettings).map(([strategy, rate], index) => {
+                      const scenarioName = `${strategy.charAt(0).toUpperCase() + strategy.slice(1)} (${rate}%)`;
                       return (
                         <Line
                           key={scenarioName}
@@ -777,7 +802,8 @@ export default function InvestmentCalculator() {
                           type="monotone"
                           stroke={`var(--chart-${index + 1})`}
                           strokeWidth={2}
-                          dot={false}
+                          dot={{ r: 4 }}
+                          activeDot={{ r: 6 }}
                         />
                       );
                     })}

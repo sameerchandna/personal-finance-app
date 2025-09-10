@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useUser } from '@clerk/nextjs';
 import { investmentService, mortgageService } from '@/lib/database';
 
@@ -41,7 +41,7 @@ export function useSavedCalculations(user: any) {
   const [error, setError] = useState<string | null>(null);
 
   // Load saved calculations
-  const loadCalculations = async () => {
+  const loadCalculations = useCallback(async () => {
     if (!user) {
       console.log('User not ready:', { user: !!user });
       return;
@@ -67,7 +67,7 @@ export function useSavedCalculations(user: any) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [user]);
 
   // Save investment calculation
   const saveInvestmentCalculation = async (calculation: Omit<SavedInvestmentCalculation, 'id' | 'created_at' | 'updated_at'>) => {
@@ -135,7 +135,7 @@ export function useSavedCalculations(user: any) {
     if (user) {
       loadCalculations();
     }
-  }, [user]);
+  }, [user, loadCalculations]);
 
   return {
     investmentCalculations,
